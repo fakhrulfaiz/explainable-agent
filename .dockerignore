@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Dependencies (will be installed in container)
+node_modules/
+env/
+venv/
+__pycache__/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Testing
+.coverage
+coverage/
+.pytest_cache/
+
+# Other
+*.tmp
+*.temp

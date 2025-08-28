@@ -1,0 +1,57 @@
+from pydantic_settings import BaseSettings
+from typing import List
+import os
+
+
+class Settings(BaseSettings):
+  
+    
+    # API Configuration
+    app_name: str = "Explainable Agent API"
+    app_version: str = "1.0.0"
+    debug: bool = False
+    
+    # Server Configuration
+    host: str = "0.0.0.0"
+    port: int = 8000
+    reload: bool = False
+    
+    # CORS Configuration
+    cors_origins: List[str] = ["*"]
+    cors_credentials: bool = True
+    cors_methods: List[str] = ["*"]
+    cors_headers: List[str] = ["*"]
+    
+    # OpenAI Configuration
+    openai_api_key: str
+    openai_model: str = "gpt-4o-mini"
+
+    deepseek_api_key: str
+    deepseek_model: str = "deepseek-chat"
+    
+    # LangSmith Configuration
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "default"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    
+    # Database Configuration
+    database_path: str = "src/resource/art.db"
+    
+    # Logging Configuration
+    logs_dir: str = "logs"
+    log_level: str = "INFO"
+    log_retention_days: int = 30
+    
+    # Security
+    api_key: str = ""  # Optional API key for endpoints
+    
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = False
+        extra = "ignore"  # Ignore extra fields from .env
+
+
+# Global settings instance
+settings = Settings() 
