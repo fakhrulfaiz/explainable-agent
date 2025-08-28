@@ -7,10 +7,9 @@ An intelligent agent system with explainable AI features, built with FastAPI bac
 - **Explainable AI**: Transparent decision-making with step-by-step explanations
 - **Interactive Chat Interface**: Real-time conversation with the AI agent
 - **Approval Workflow**: Human-in-the-loop decision making
-- **Agent Streaming**: Real-time agent responses with streaming support
-- **LangGraph Integration**: Advanced agent workflow management
-- **Docker Support**: Easy deployment with Docker containers
-- **RESTful API**: FastAPI backend with automatic documentation
+- **LangGraph Integration**: Agent workflow management
+- **Docker Support**: Easy setup with Docker containers
+- **RESTful API**: FastAPI backend 
 
 ## 🏗️ Architecture
 
@@ -18,12 +17,6 @@ An intelligent agent system with explainable AI features, built with FastAPI bac
 - **Frontend**: React TypeScript with Vite and Tailwind CSS
 - **Reverse Proxy**: Nginx for routing and load balancing
 - **Containerization**: Docker and Docker Compose for easy deployment
-
-## 📋 Prerequisites
-
-- [Docker](https://www.docker.com/get-started) (v20.0 or higher)
-- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0 or higher)
-- [Git](https://git-scm.com/downloads)
 
 ## 🚀 Quick Start
 
@@ -98,19 +91,6 @@ VITE_ENABLE_STREAMING=true
 ```
 
 ### 3. Run with Docker (Recommended)
-
-#### Production Mode
-
-```bash
-# Build and start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-```
 
 #### Development Mode
 
@@ -223,37 +203,6 @@ docker-compose down -v
 docker-compose up --build -d
 ```
 
-### Development vs Production
-
-- **Development**: Hot reload enabled, source code mounted as volumes
-- **Production**: Optimized builds, no source code mounting
-
-## 📁 Project Structure
-
-```
-explainable-agent/
-├── backend/                    # FastAPI backend
-│   ├── src/
-│   │   ├── models/            # Data models and schemas
-│   │   ├── services/          # Business logic and agent services
-│   │   ├── nodes/             # LangGraph nodes
-│   │   └── tools/             # Agent tools
-│   ├── routers/               # API route handlers
-│   ├── requirements.txt       # Python dependencies
-│   └── server.py             # FastAPI application entry point
-├── frontend/                  # React TypeScript frontend
-│   ├── src/
-│   │   ├── components/        # React components
-│   │   ├── pages/            # Page components
-│   │   ├── api/              # API client and services
-│   │   └── types/            # TypeScript type definitions
-│   └── package.json          # Node.js dependencies
-├── nginx/                     # Nginx configuration
-├── docker-compose.yml         # Production Docker setup
-├── docker-compose.dev.yml     # Development overrides
-└── README.md                 # This file
-```
-
 ## 🔧 Configuration
 
 ### Environment Variables Reference
@@ -279,40 +228,6 @@ explainable-agent/
 | `VITE_ENABLE_APPROVAL_WORKFLOW` | No       | `true`                 | Enable approval workflow UI |
 | `VITE_ENABLE_STREAMING`         | No       | `true`                 | Enable streaming chat       |
 
-## 🚨 Troubleshooting
-
-### Common Issues
-
-1. **Port Already in Use**
-
-   ```bash
-   # Check what's using port 80
-   netstat -tulpn | grep :80
-
-   # Use different port
-   docker-compose up -d --scale nginx=0
-   # Then access backend directly at http://localhost:8000
-   ```
-
-2. **Permission Denied (Linux/Mac)**
-
-   ```bash
-   sudo chown -R $USER:$USER ./backend/logs
-   ```
-
-3. **Module Not Found Errors**
-
-   ```bash
-   # Rebuild containers
-   docker-compose down
-   docker-compose build --no-cache
-   docker-compose up -d
-   ```
-
-4. **Frontend Not Loading**
-   - Check if all environment variables are set
-   - Verify API_URL points to correct backend
-   - Check browser console for errors
 
 ### Logs and Debugging
 
@@ -328,35 +243,3 @@ docker-compose logs nginx
 # Follow logs in real-time
 docker-compose logs -f backend
 ```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [LangChain](https://langchain.com/) for the agent framework
-- [LangGraph](https://langchain-ai.github.io/langgraph/) for agent workflow management
-- [FastAPI](https://fastapi.tiangolo.com/) for the backend framework
-- [React](https://reactjs.org/) for the frontend framework
-- [Tailwind CSS](https://tailwindcss.com/) for styling
-
-## 📞 Support
-
-If you encounter any issues or have questions, please:
-
-1. Check the [troubleshooting section](#-troubleshooting)
-2. Search existing [GitHub Issues](https://github.com/fakhrulfaiz/explainable-agent/issues)
-3. Create a new issue with detailed information about your problem
-
----
-
-**Happy coding! 🚀**
