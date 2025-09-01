@@ -1,0 +1,48 @@
+/* Global slim scrollbar styles */
+.slim-scroll {
+  scrollbar-gutter: stable;
+}
+
+.slim-scroll::-webkit-scrollbar {
+  width: 6px;
+  position: absolute;
+}
+
+.slim-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.slim-scroll::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+
+.slim-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af;
+  opacity: 1;
+}
+
+.slim-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Horizontal scrollbar variant for code blocks */
+.slim-scroll-x::-webkit-scrollbar {
+  height: 6px;
+}
+
+.slim-scroll-x::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.slim-scroll-x::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+
+.slim-scroll-x::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af;
+  opacity: 1;
+}

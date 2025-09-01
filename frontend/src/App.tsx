@@ -8,7 +8,7 @@ const AppContent: React.FC = () => {
   return (
     <div style={{ height: '100vh', backgroundColor: '#f9fafb', display: 'flex', flexDirection: 'column' }}>
       <Header />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: '1rem' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: '6rem' }}>
         <Routes>
           <Route path="/" element={<ChatWithApproval />} />
           <Route path="/simple" element={<SimpleChat />} />

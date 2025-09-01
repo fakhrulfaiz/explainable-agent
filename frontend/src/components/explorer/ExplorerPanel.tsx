@@ -1,0 +1,152 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import StepDetails, { ExplorerStep } from '../StepDetails';
+import '../../styles/scrollbar.css';
+
+
+
+export type ExplorerResult = {
+  thread_id: string;
+  run_status: string;
+  assistant_response?: string;
+  plan?: string;
+  error?: string | null;
+  steps?: ExplorerStep[];
+  final_result?: {
+    summary?: string;
+    details?: string;
+    source?: string;
+    inference?: string;
+    extra_explanation?: string;
+  };
+  total_time?: number | null;
+  overall_confidence?: number;
+};
+
+type ExplorerPanelProps = { 
+  open: boolean;
+  onClose: () => void;
+  data: ExplorerResult | null;
+  initialWidthPx?: number;
+  minWidthPx?: number;
+  maxWidthPx?: number;
+};
+
+const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, initialWidthPx = 620, minWidthPx = 320, maxWidthPx = 1100}) => {
+  const [width, setWidth] = useState<number>(initialWidthPx);
+  const isResizingRef = useRef<boolean>(false);
+
+  const onMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizingRef.current) return;
+    const newWidth = Math.min(Math.max(window.innerWidth - e.clientX, minWidthPx), maxWidthPx);
+    setWidth(newWidth);
+  }, [minWidthPx, maxWidthPx]);
+
+  const onMouseUp = useCallback(() => {
+    isResizingRef.current = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
+
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [onMouseMove, onMouseUp]);
+
+  return (
+    <div
+        className={`fixed top-0 right-0 h-full bg-white shadow-xl border-l border-gray-200 transform transition-transform duration-300 ease-in-out z-40 ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        style={{ width , paddingTop: '4rem' }}
+      >
+        {/* Resize handle */}
+        <div
+          onMouseDown={startResize}
+          className="absolute left-0 top-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-gray-200/50"
+          aria-label="Resize"
+        />
+
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
+          <h3 className="font-semibold text-gray-900">Agent Explorer</h3>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm">Close</button>
+          </div>
+        </div>
+
+        <div 
+          className="p-4 h-[calc(100%-56px)] slim-scroll"
+          style={{
+            overflowY: 'overlay' as any,
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#d1d5db transparent'
+          }}
+        >
+          {!data ? (
+            <div className="text-gray-500 text-base">No data yet. Send a message and open after the result.</div>
+          ) : (
+            <div className="space-y-4">
+            {/* Summary */}
+            <div className="p-3 bg-green-50 rounded border border-green-200">
+              <div className="text-base text-gray-800 font-medium mb-1">Summary</div>
+              <div className="text-gray-700 text-base">
+                {data.final_result?.summary || data.assistant_response || '—'}
+              </div>
+            </div>
+
+            {/* Plan */}
+            {data.plan && (
+              <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                <div className="text-base text-gray-800 font-medium mb-1">Plan</div>
+                <pre className="text-sm whitespace-pre-wrap text-gray-700">{data.plan}</pre>
+              </div>
+            )}
+
+            {/* Details */}
+            {data.final_result?.details && (
+              <div className="p-3 bg-gray-50 rounded border border-gray-200">
+                <div className="text-base text-gray-800 font-medium mb-1">Details</div>
+                <div className="text-sm text-gray-700">{data.final_result.details}</div>
+              </div>
+            )}
+
+            {/* Steps */}
+            <StepDetails steps={data.steps || []} />
+
+            {/* Meta */}
+            <div className="grid grid-cols-2 gap-2 text-sm text-gray-700">
+              <div className="p-2 bg-gray-50 rounded border border-gray-200">
+                <div className="text-gray-500">Status</div>
+                <div className="font-medium">{data.run_status}</div>
+              </div>
+              <div className="p-2 bg-gray-50 rounded border border-gray-200">
+                <div className="text-gray-500">Confidence</div>
+                <div className="font-medium">{typeof data.overall_confidence === 'number' ? `${(data.overall_confidence * 100).toFixed(0)}%` : '—'}</div>
+              </div>
+              <div className="p-2 bg-gray-50 rounded border border-gray-200">
+                <div className="text-gray-500">Total time</div>
+                <div className="font-medium">{typeof data.total_time === 'number' ? `${data.total_time.toFixed(2)}s` : '—'}</div>
+              </div>
+              <div className="p-2 bg-gray-50 rounded border border-gray-200">
+                <div className="text-gray-500">Thread</div>
+                <div className="font-medium">{data.thread_id?.slice(0, 8)}...</div>
+              </div>
+            </div>
+            </div>
+          )}
+        </div>
+      </div>
+  );
+};
+
+export default ExplorerPanel;
+
+

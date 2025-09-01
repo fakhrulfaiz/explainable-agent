@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { ChatComponent } from '../components';
+import { ChatComponent, ExplorerPanel } from '../components';
 import { Message } from '../types/chat';
 import { GraphService } from '../api/services/graphService';
 
 const ChatWithApproval: React.FC = () => {
   const [chatKey, setChatKey] = useState<number>(0); // For resetting chat
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
+  const [explorerOpen, setExplorerOpen] = useState<boolean>(false);
+  const [explorerData, setExplorerData] = useState<any | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{
     threadId: string;
     plan: string;
@@ -14,6 +16,10 @@ const ChatWithApproval: React.FC = () => {
 
   // Handle sending messages using the graph API
   const handleSendMessage = async (message: string, messageHistory: Message[]): Promise<string> => {
+    // Clear previous explorer data when starting a new request
+    setExplorerData(null);
+    setExplorerOpen(false);
+    
     try {
       // Start a new graph execution
       const response = await GraphService.startGraph({
@@ -37,6 +43,8 @@ const ChatWithApproval: React.FC = () => {
         return `**Plan for your request:**\n\n${plan}\n\n**This plan requires your approval before execution.**`;
       } else if (response.run_status === 'finished') {
         // Execution completed without approval needed
+        setExplorerData(response);
+        setExplorerOpen(true);
         return response.assistant_response || 'Task completed successfully.';
       } else if (response.run_status === 'error') {
         throw new Error(response.error || 'An error occurred while processing your request.');
@@ -69,6 +77,8 @@ const ChatWithApproval: React.FC = () => {
       
       if (response.run_status === 'finished') {
         // Return the final result to be displayed in chat
+        setExplorerData(response);
+        setExplorerOpen(true);
         const finalResponse = response.assistant_response || 'Task completed successfully.';
         
         // Add step information if available
@@ -134,6 +144,8 @@ const ChatWithApproval: React.FC = () => {
         
       } else if (response.run_status === 'finished') {
         // Execution completed after feedback
+        setExplorerData(response);
+        setExplorerOpen(true);
         const finalResponse = response.assistant_response || 'Task completed successfully after feedback.';
         
         // Add step information if available
@@ -271,18 +283,12 @@ const ChatWithApproval: React.FC = () => {
   return (
     <div style={{ height: '100%', padding: '0 0.5rem', display: 'flex', flexDirection: 'column' }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>
-            Explainable Agent Chat
-          </h1>
-        </div>
-
+      
         {/* Chat Container */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', height: '100%', display: 'flex', flexDirection: 'column' }}>
             <div className="p-4 border-b border-gray-200">
-              <h2 className="font-semibold text-gray-900">Chat with Approval</h2>
+              <h2 className="font-semibold text-gray-900">Explainable Agent</h2>
               <p className="text-sm text-gray-600">Messages require approval/disapproval for AI learning</p>
             </div>
             <div className="flex-1 min-h-0">
@@ -298,6 +304,18 @@ const ChatWithApproval: React.FC = () => {
                 placeholder="Ask me anything..."
                 showApprovalButtons={true}
                 className="h-full"
+                renderBelowLastMessage={
+                  explorerData ? (
+                    <div className="mt-2 flex justify-start w-full">
+                      <button
+                        onClick={() => setExplorerOpen(true)}
+                        className="w-full px-4 py-2 text-sm text-gray-800 border border-gray-300 rounded hover:bg-gray-50 text-left"
+                      >
+                        Open Explorer
+                      </button>
+                    </div>
+                  ) : null
+                }
               />
             </div>
           </div>
@@ -310,6 +328,8 @@ const ChatWithApproval: React.FC = () => {
               setChatKey(prev => prev + 1);
               setCurrentThreadId(null);
               setPendingApproval(null);
+              setExplorerData(null);
+              setExplorerOpen(false);
             }}
             className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors mr-4"
           >
@@ -330,6 +350,8 @@ const ChatWithApproval: React.FC = () => {
           </span>
         </div>
       </div>
+      {/* Slide-out Explorer Panel */}
+      <ExplorerPanel open={explorerOpen} onClose={() => setExplorerOpen(false)} data={explorerData} />
     </div>
   );
 };

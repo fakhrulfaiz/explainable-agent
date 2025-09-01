@@ -4,6 +4,7 @@ import { Message as MessageType, ChatComponentProps } from '../types/chat';
 import Message from './Message';
 import FeedbackForm from './FeedbackForm';
 import LoadingIndicator from './LoadingIndicator';
+import '../styles/scrollbar.css';
 
 const ChatComponent: React.FC<ChatComponentProps> = ({ 
   onSendMessage, 
@@ -16,7 +17,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   className = "",
   placeholder = "Type your message...",
   showApprovalButtons = true,
-  disabled = false 
+  disabled = false,
+  renderBelowLastMessage
 }) => {
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [inputValue, setInputValue] = useState<string>('');
@@ -487,7 +489,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+      <div 
+        className="flex-1 p-4 space-y-4 min-h-0 slim-scroll"
+        style={{
+          overflowY: 'overlay' as any,
+          scrollbarWidth: 'thin',
+          scrollbarColor: '#d1d5db transparent'
+        }}
+      >
         {messages.length === 0 ? (
           <div className="text-center text-gray-500 mt-8">
             <p>Start a conversation...</p>
@@ -501,6 +510,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
             />
           ))
         )}
+
+        {/* Below-last-message slot */}
+        {messages.length > 0 && renderBelowLastMessage}
 
         {/* Loading indicator */}
         {isLoading && <LoadingIndicator />}

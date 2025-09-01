@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
 
     # Create agent instances
     explainable_agent = ExplainableAgent(
-        llm=deepseek_llm,
+        llm=llm,
         db_path=settings.database_path,
         logs_dir=settings.logs_dir
     )

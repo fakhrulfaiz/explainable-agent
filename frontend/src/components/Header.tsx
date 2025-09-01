@@ -41,7 +41,8 @@ const Header: React.FC = () => {
       borderBottom: '1px solid #e5e7eb',
       boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
       width: '100%',
-      position: 'relative'
+      position: 'fixed',
+      zIndex: 1000
     }}>
       <div style={{
         maxWidth: '1200px',

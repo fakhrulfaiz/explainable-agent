@@ -26,6 +26,7 @@ export interface ChatComponentProps {
   placeholder?: string;
   showApprovalButtons?: boolean;
   disabled?: boolean;
+  renderBelowLastMessage?: React.ReactNode;
 }
 
 export interface MessageComponentProps {
