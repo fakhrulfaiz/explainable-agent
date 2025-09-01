@@ -13,6 +13,7 @@ import json
 import os
 from datetime import datetime
 from pydantic import BaseModel, Field
+from src.models.database import mongo_client, mongo_memory
 
 try:
     from explainer import Explainer
@@ -87,7 +88,7 @@ class ExplainableAgent:
         graph.add_edge("explain", "agent")
         
         # Add memory checkpointer for interrupt functionality
-        memory = MemorySaver()
+        memory = mongo_memory
         return graph.compile(interrupt_before=["human_feedback"], checkpointer=memory)
     
     def human_feedback(self, state: ExplainableAgentState):

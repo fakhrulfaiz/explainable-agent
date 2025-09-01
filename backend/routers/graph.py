@@ -5,6 +5,8 @@ from typing import Annotated
 
 from src.models.schemas import StartRequest, GraphResponse, ResumeRequest
 from src.services.explainable_agent import ExplainableAgent
+from langchain_core.messages import HumanMessage
+from src.services.explainable_agent import ExplainableAgentState
 
 router = APIRouter(
     prefix="/graph",
@@ -37,7 +39,6 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             # Get the plan from current state for user review
             current_values = state.values
             
-            # Check if there's an assistant_response (for direct answers) or use plan
             assistant_response = current_values.get("assistant_response") or current_values.get("plan", "Plan generated - awaiting approval")
             plan = current_values.get("plan", "")
             
@@ -63,7 +64,6 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                     assistant_response = msg.content
                     break
             
-            # If no assistant response found from messages, try to get from final event
             if not assistant_response and events:
                 final_event = events[-1]
                 if isinstance(final_event, dict) and "messages" in final_event:
@@ -121,24 +121,27 @@ def start_graph(
     request: StartRequest,
     agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
 ):
-  
-    thread_id = str(uuid4())
-    config = {"configurable": {"thread_id": thread_id}}
-    
-    # Create initial state for the explainable agent
-    from langchain_core.messages import HumanMessage
-    from src.services.explainable_agent import ExplainableAgentState
-    
-    initial_state = ExplainableAgentState(
-        messages=[HumanMessage(content=request.human_request)],
-        query=request.human_request,
-        plan="",
-        steps=[],
-        step_counter=0,
-        status="approved"  
-    )
-    
-    return run_graph_and_response(agent, initial_state, config)
+    try:
+        # Use provided thread_id or generate new one
+        thread_id = request.thread_id or str(uuid4())
+        config = {"configurable": {"thread_id": thread_id}}
+         
+        initial_state = ExplainableAgentState(
+            messages=[HumanMessage(content=request.human_request)],
+            query=request.human_request,
+            plan="",
+            steps=[],
+            step_counter=0,
+            status="approved"  
+        )
+        
+        return run_graph_and_response(agent, initial_state, config)
+    except Exception as e:
+        return GraphResponse(
+            thread_id=thread_id if 'thread_id' in locals() else "unknown",
+            run_status="error",
+            error=f"Failed to start graph: {str(e)}"
+        )
 
 
 @router.post("/resume", response_model=GraphResponse)
@@ -154,7 +157,7 @@ def resume_graph(
         if not current_state:
             raise HTTPException(status_code=404, detail=f"No graph execution found for thread_id: {request.thread_id}")
         
-        # Prepare state update
+     
         state_update = {"status": request.review_action}
         if request.human_comment is not None:
             state_update["human_comment"] = request.human_comment

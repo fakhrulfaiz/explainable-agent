@@ -22,6 +22,7 @@ export interface ChatComponentProps {
   onRetry?: (message: Message) => Promise<string | void> | string | void;
   onMessageCreated?: (messageId: number) => void;
   currentThreadId?: string | null;
+  initialMessages?: Message[];
   className?: string;
   placeholder?: string;
   showApprovalButtons?: boolean;
@@ -45,6 +46,7 @@ export interface FeedbackFormProps {
 // Graph API Types
 export interface StartRequest {
   human_request: string;
+  thread_id?: string; // Optional thread ID for existing conversations
 }
 
 export interface ResumeRequest {

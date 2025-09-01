@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { ChatComponent, ExplorerPanel } from '../components';
+import ChatThreadSelector from '../components/ChatThreadSelector';
 import { Message } from '../types/chat';
 import { GraphService } from '../api/services/graphService';
+import { ChatHistoryService } from '../api/services/chatHistoryService';
 
 const ChatWithApproval: React.FC = () => {
   const [chatKey, setChatKey] = useState<number>(0); // For resetting chat
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
+  const [selectedChatThreadId, setSelectedChatThreadId] = useState<string | null>(null);
   const [explorerOpen, setExplorerOpen] = useState<boolean>(false);
   const [explorerData, setExplorerData] = useState<any | null>(null);
   const [pendingApproval, setPendingApproval] = useState<{
@@ -13,25 +16,76 @@ const ChatWithApproval: React.FC = () => {
     plan: string;
     messageId: number;
   } | null>(null);
+  const [loadingThread, setLoadingThread] = useState<boolean>(false);
+  const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
 
-  // Handle sending messages using the graph API
+ 
+  const convertChatHistoryToMessages = (chatMessages: any[]): Message[] => {
+    return chatMessages.map((msg, index) => ({
+      id: Date.now() + index, // Generate unique IDs
+      role: msg.sender as 'user' | 'assistant',
+      content: msg.content,
+      timestamp: new Date(msg.timestamp),
+      needsApproval: false, // Historical messages don't need approval
+      threadId: selectedChatThreadId || undefined
+    }));
+  };
+
+  
+  const createNewChatThread = async (initialMessage?: string): Promise<string> => {
+    try {
+      const thread = await ChatHistoryService.createThread({
+        title: initialMessage ? `Chat: ${initialMessage}` : 'New Chat',
+        initial_message: initialMessage
+      });
+      return thread.thread_id;
+    } catch (error) {
+      console.error('Error creating chat thread:', error);
+      throw error;
+    }
+  };
+
+  const storeMessage = async (chatThreadId: string, sender: 'user' | 'assistant', content: string) => {
+    try {
+      await ChatHistoryService.addMessage({
+        thread_id: chatThreadId,
+        sender,
+        content
+      });
+    } catch (error) {
+      console.error('Error storing message:', error);
+    }
+  };
+
   const handleSendMessage = async (message: string, messageHistory: Message[]): Promise<string> => {
     // Clear previous explorer data when starting a new request
     setExplorerData(null);
     setExplorerOpen(false);
     
     try {
-      // Start a new graph execution
+      // Create or use existing chat thread for history storage
+      let chatThreadId = selectedChatThreadId;
+      if (!chatThreadId) {
+        chatThreadId = await createNewChatThread(message);
+        setSelectedChatThreadId(chatThreadId);
+      } else {
+        await storeMessage(chatThreadId, 'user', message);
+      }
+
       const response = await GraphService.startGraph({
-        human_request: message
+        human_request: message,
+        thread_id: chatThreadId
       });
 
-      // Store thread ID for future operations
       setCurrentThreadId(response.thread_id);
 
       if (response.run_status === 'user_feedback') {
         // Need human approval for the plan
         const plan = response.plan || response.assistant_response || 'Plan generated - awaiting approval';
+        const assistantResponse = `**Plan for your request:**\n\n${plan}\n\n**This plan requires your approval before execution.**`;
+        
+        // Store assistant response in chat history
+        await storeMessage(chatThreadId, 'assistant', assistantResponse);
         
         // Store pending approval info
         setPendingApproval({
@@ -40,17 +94,24 @@ const ChatWithApproval: React.FC = () => {
           messageId: messageHistory.length + 1 // Next message ID
         });
 
-        return `**Plan for your request:**\n\n${plan}\n\n**This plan requires your approval before execution.**`;
+        return assistantResponse;
       } else if (response.run_status === 'finished') {
         // Execution completed without approval needed
+        const assistantResponse = response.assistant_response || 'Task completed successfully.';
+        
+        // Store assistant response in chat history
+        await storeMessage(chatThreadId, 'assistant', assistantResponse);
+        
         setExplorerData(response);
         setExplorerOpen(true);
-        return response.assistant_response || 'Task completed successfully.';
+        return assistantResponse;
       } else if (response.run_status === 'error') {
         throw new Error(response.error || 'An error occurred while processing your request.');
       }
 
-      return response.assistant_response || 'Processing...';
+      const assistantResponse = response.assistant_response || 'Processing...';
+      await storeMessage(chatThreadId, 'assistant', assistantResponse);
+      return assistantResponse;
     } catch (error) {
       console.error('Error in handleSendMessage:', error);
       throw error;
@@ -94,12 +155,22 @@ const ChatWithApproval: React.FC = () => {
           }
         }
         
+        // Store assistant response in chat history
+        if (selectedChatThreadId) {
+          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse);
+        }
+        
         return detailedResponse;
         
       } else if (response.run_status === 'error') {
         throw new Error(response.error || 'An error occurred during execution');
       } else {
-        return response.assistant_response || 'Execution in progress...';
+        const assistantResponse = response.assistant_response || 'Execution in progress...';
+        // Store assistant response in chat history
+        if (selectedChatThreadId) {
+          await storeMessage(selectedChatThreadId, 'assistant', assistantResponse);
+        }
+        return assistantResponse;
       }
       
     } catch (error) {
@@ -108,8 +179,6 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
- 
-  // Handle feedback (when user provides revision comments)
   const handleDisapprove = async (content: string, message: Message): Promise<string> => {
     console.log('Feedback attempt:', { pendingApproval, messageId: message.id, feedback: content });
     
@@ -140,7 +209,15 @@ const ChatWithApproval: React.FC = () => {
           messageId: 0 // Will be updated by onMessageCreated callback
         });
         
-        return `**Revised Plan:**\n\n${newPlan}\n\n⚠️ **This revised plan requires your approval before execution.**`;
+        const revisedResponse = `**Revised Plan:**\n\n${newPlan}\n\n⚠️ **This revised plan requires your approval before execution.**`;
+        
+        // Store feedback and revised plan in chat history
+        if (selectedChatThreadId) {
+          await storeMessage(selectedChatThreadId, 'user', content); // Store the feedback
+          await storeMessage(selectedChatThreadId, 'assistant', revisedResponse); // Store the revised plan
+        }
+        
+        return revisedResponse;
         
       } else if (response.run_status === 'finished') {
         // Execution completed after feedback
@@ -161,12 +238,22 @@ const ChatWithApproval: React.FC = () => {
           }
         }
         
+        // Store assistant response in chat history
+        if (selectedChatThreadId) {
+          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse);
+        }
+        
         return detailedResponse;
         
       } else if (response.run_status === 'error') {
         throw new Error(response.error || 'An error occurred during execution');
       } else {
-        return response.assistant_response || 'Processing feedback...';
+        const assistantResponse = response.assistant_response || 'Processing feedback...';
+        // Store assistant response in chat history
+        if (selectedChatThreadId) {
+          await storeMessage(selectedChatThreadId, 'assistant', assistantResponse);
+        }
+        return assistantResponse;
       }
       
     } catch (error) {
@@ -195,7 +282,7 @@ const ChatWithApproval: React.FC = () => {
       // Clear pending approval
       setPendingApproval(null);
       
-      return `❌ **Execution Cancelled**\n\nThe task has been cancelled and will not be executed.`;
+      return `**Execution Cancelled**\n\nThe task has been cancelled and will not be executed.`;
       
     } catch (error) {
       console.error('Error cancelling execution:', error);
@@ -221,8 +308,6 @@ const ChatWithApproval: React.FC = () => {
         response = await GraphService.approveAndContinue(threadId);
       } else if (message.retryAction === 'disapprove') {
         console.log('Retrying feedback for thread:', threadId);
-        // For disapprove retry, we might need the original feedback text
-        // For now, we'll use a generic retry message
         response = await GraphService.provideFeedbackAndContinue(threadId, 'Retrying previous action');
       } else {
         throw new Error('Unknown retry action');
@@ -272,7 +357,6 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  // Handle when a new message that needs approval is created
   const handleMessageCreated = (messageId: number) => {
     if (pendingApproval && pendingApproval.messageId === 0) {
       // Update the pending approval with the new message ID
@@ -280,16 +364,82 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
+  // Handle thread selection
+  const handleThreadSelect = async (threadId: string | null) => {
+    if (threadId === selectedChatThreadId) return;
+
+    setLoadingThread(true);
+    try {
+      setSelectedChatThreadId(threadId);
+      
+      if (threadId) {
+        // Load the selected thread and restore messages
+        const thread = await ChatHistoryService.restoreThread(threadId);
+        console.log('Restored thread:', thread);
+       
+        const convertedMessages = convertChatHistoryToMessages(thread.messages || []);
+        setRestoredMessages(convertedMessages);
+        
+        setChatKey(prev => prev + 1);
+      } else {
+        // Clear selection and messages
+        setRestoredMessages([]);
+        setChatKey(prev => prev + 1);
+      }
+      
+      // Reset current states
+      setCurrentThreadId(null);
+      setPendingApproval(null);
+      setExplorerData(null);
+      setExplorerOpen(false);
+    } catch (error) {
+      console.error('Error selecting thread:', error);
+      alert('Failed to load chat thread');
+    } finally {
+      setLoadingThread(false);
+    }
+  };
+
+  // Handle creating new thread
+  const handleNewThread = () => {
+    setSelectedChatThreadId(null);
+    setRestoredMessages([]); // Clear restored messages
+    setChatKey(prev => prev + 1);
+    setCurrentThreadId(null);
+    setPendingApproval(null);
+    setExplorerData(null);
+    setExplorerOpen(false);
+  };
+
   return (
     <div style={{ height: '100%', padding: '0 0.5rem', display: 'flex', flexDirection: 'column' }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       
+        {/* Thread Selector */}
+        <div className="mb-4">
+          <ChatThreadSelector
+            selectedThreadId={selectedChatThreadId || undefined}
+            onThreadSelect={handleThreadSelect}
+            onNewThread={handleNewThread}
+            className="max-w-md"
+          />
+        </div>
+
         {/* Chat Container */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', height: '100%', display: 'flex', flexDirection: 'column' }}>
             <div className="p-4 border-b border-gray-200">
-              <h2 className="font-semibold text-gray-900">Explainable Agent</h2>
-              <p className="text-sm text-gray-600">Messages require approval/disapproval for AI learning</p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-semibold text-gray-900">Explainable Agent</h2>
+                  <p className="text-sm text-gray-600">Messages require approval/disapproval for AI learning</p>
+                </div>
+                {selectedChatThreadId && (
+                  <div className="text-xs text-gray-500">
+                    Chat ID: {selectedChatThreadId.slice(0, 8)}...
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex-1 min-h-0">
               <ChatComponent
@@ -301,6 +451,7 @@ const ChatWithApproval: React.FC = () => {
                 onRetry={handleRetry}
                 onMessageCreated={handleMessageCreated}
                 currentThreadId={currentThreadId}
+                initialMessages={restoredMessages}
                 placeholder="Ask me anything..."
                 showApprovalButtons={true}
                 className="h-full"
@@ -324,6 +475,12 @@ const ChatWithApproval: React.FC = () => {
         {/* Controls */}
         <div className="mt-4 text-center">
           <button
+            onClick={handleNewThread}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mr-4"
+          >
+            New Thread
+          </button>
+          <button
             onClick={() => {
               setChatKey(prev => prev + 1);
               setCurrentThreadId(null);
@@ -337,7 +494,7 @@ const ChatWithApproval: React.FC = () => {
           </button>
           {currentThreadId && (
             <span className="text-xs text-gray-500 mr-4">
-              Thread: {currentThreadId.slice(0, 8)}...
+              Graph Thread: {currentThreadId.slice(0, 8)}...
             </span>
           )}
           {pendingApproval && (
@@ -345,8 +502,13 @@ const ChatWithApproval: React.FC = () => {
               ⏳ Awaiting approval (Msg: {pendingApproval.messageId})
             </span>
           )}
+          {loadingThread && (
+            <span className="text-xs text-blue-600 mr-4">
+              📂 Loading thread...
+            </span>
+          )}
           <span className="text-sm text-gray-500">
-            💡 Ask database questions to see the approval workflow
+            💡 Select a thread above or ask database questions to see the approval workflow
           </span>
         </div>
       </div>

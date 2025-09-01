@@ -63,10 +63,43 @@ services:
     networks:
       - explainable-agent-network
 
+  mongodb:
+    image: mongo:6.0
+    container_name: explainable-agent-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: explainable-agent-secret
+      MONGO_INITDB_DATABASE: explainable_agent_db
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - explainable-agent-network
+
+  mongo-express:
+    image: mongo-express:1.0.0-alpha.4
+    container_name: explainable-agent-mongo-express
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: explainable-agent-secret
+      ME_CONFIG_MONGODB_URL: mongodb://root:explainable-agent-secret@mongodb:27017/
+    depends_on:
+      - mongodb
+    networks:
+      - explainable-agent-network
+
 volumes:
   backend_venv:
     driver: local
   backend_logs:
+    driver: local
+  mongodb_data:
+    name: explainable-agent-mongodb-data
     driver: local
 
 networks:

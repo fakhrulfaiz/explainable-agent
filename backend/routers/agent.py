@@ -12,7 +12,6 @@ router = APIRouter(
     tags=["agent"]
 )
 
-# Dependency functions that access app state
 def get_explainable_agent(request: Request) -> ExplainableAgent:
     return request.app.state.explainable_agent
 

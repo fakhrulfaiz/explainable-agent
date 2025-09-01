@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # Database Configuration
     database_path: str = "src/resource/art.db"
     
+    # MongoDB Configuration
+    mongo_host: str = "mongodb"
+    mongo_port: int = 27017
+    mongo_username: str = "root"
+    mongo_password: str = "explainable-agent-secret"
+    mongo_database: str = "explainable_agent_db"
+    mongo_auth_source: str = "admin"
+    
     # Logging Configuration
     logs_dir: str = "logs"
     log_level: str = "INFO"

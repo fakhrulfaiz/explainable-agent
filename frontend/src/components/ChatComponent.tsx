@@ -14,13 +14,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   onRetry,
   onMessageCreated,
   currentThreadId,
+  initialMessages = [],
   className = "",
   placeholder = "Type your message...",
   showApprovalButtons = true,
   disabled = false,
   renderBelowLastMessage
 }) => {
-  const [messages, setMessages] = useState<MessageType[]>([]);
+  const [messages, setMessages] = useState<MessageType[]>(initialMessages);
   const [inputValue, setInputValue] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [pendingApproval, setPendingApproval] = useState<number | null>(null);
@@ -38,6 +39,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       scrollToBottom();
     }
   }, [messages]);
+
+  // Update messages when initialMessages prop changes
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [initialMessages]);
 
   const handleSend = async (): Promise<void> => {
     if (!inputValue.trim() || isLoading || disabled) return;

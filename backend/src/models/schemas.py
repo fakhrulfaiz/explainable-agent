@@ -81,8 +81,8 @@ class FinalResult(BaseModel):
 
 # Graph-based API models
 class StartRequest(BaseModel):
-   
     human_request: str = Field(..., min_length=1, max_length=1000, description="User request to process")
+    thread_id: Optional[str] = Field(None, description="Optional thread ID for existing conversations")
 
 
 class ResumeRequest(BaseModel):

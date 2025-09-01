@@ -22,7 +22,7 @@ const Message: React.FC<MessageComponentProps> = ({
               : message.approved
               ? 'bg-green-50 text-green-700 border border-green-200'
               : message.disapproved
-              ? 'bg-gray-50 text-gray-700 border border-gray-200'
+              ? 'bg-red-50 text-gray-700 border border-red-200'
               : 'bg-gray-100 text-gray-900'
           }`}
         >
@@ -67,7 +67,7 @@ const Message: React.FC<MessageComponentProps> = ({
             <span className="ml-2 text-green-600 font-medium">✓ Approved</span>
           )}
           {message.disapproved && (
-            <span className="ml-2 text-gray-600 font-medium">Cancelled</span>
+            <span className="ml-2 text-red-600 font-medium">Cancelled</span>
           )}
           {message.hasTimedOut && (
             <span className="ml-2 text-orange-600 font-medium">Timed out</span>

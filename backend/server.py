@@ -13,14 +13,14 @@ from src.services.explainable_agent import ExplainableAgent
 from src.services.simple_agent import SimpleAgent
 from src.services.async_simple_agent import AsyncSimpleAgent
 
-from routers import agent, graph, test_stream
+from routers import agent, graph, test_stream, chat_history
 
 
 # Lifespan context manager for startup/shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Initialize resources
-    print("🚀 Starting up Explainable Agent API...")
+    print("Starting up Explainable Agent API...")
     
     # Configure LangSmith tracing if enabled
     if settings.langsmith_tracing and settings.langsmith_api_key:
@@ -68,13 +68,12 @@ async def lifespan(app: FastAPI):
     app.state.simple_agent = simple_agent
     app.state.async_simple_agent = async_simple_agent
     
-    print("✅ All services initialized successfully!")
+    print("All services initialized successfully!")
     
     yield
     
-    print("🛑 Shutting down Explainable Agent API...")
-    # Add any cleanup code here if needed
-    print("✅ Cleanup completed!")
+    print("Shutting down Explainable Agent API...")
+    
 
 
 # Create FastAPI instance with lifespan
@@ -99,6 +98,7 @@ app.add_middleware(
 app.include_router(agent.router)
 app.include_router(graph.router)
 app.include_router(test_stream.router)
+app.include_router(chat_history.router)
 
 @app.get("/")
 async def root():
