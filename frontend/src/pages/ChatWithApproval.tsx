@@ -177,10 +177,13 @@ const ChatWithApproval: React.FC = () => {
         const assistantResponse = response.assistant_response || 'Task completed successfully.';
         
         // Store assistant response in chat history
-        // If response has steps, store as explorer type with checkpoint ID
-        const messageType = response.steps && response.steps.length > 0 ? 'explorer' : 'message';
-        const checkpointId = messageType === 'explorer' ? response.thread_id : undefined;
-        await storeMessage(chatThreadId, 'assistant', assistantResponse, messageType, checkpointId);
+        // Always store as regular message for chat history
+        await storeMessage(chatThreadId, 'assistant', assistantResponse, 'message');
+        
+        // If response has steps, also store as explorer type with checkpoint ID
+        if (response.steps && response.steps.length > 0) {
+          await storeMessage(chatThreadId, 'assistant', assistantResponse, 'explorer', response.thread_id);
+        }
         
         setExplorerData(response);
         setExplorerOpen(true);
@@ -236,11 +239,14 @@ const ChatWithApproval: React.FC = () => {
         }
         
         // Store assistant response in chat history
-        // If response has steps, store as explorer type with checkpoint ID
         if (selectedChatThreadId) {
-          const messageType = response.steps && response.steps.length > 0 ? 'explorer' : 'message';
-          const checkpointId = messageType === 'explorer' ? response.thread_id : undefined;
-          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, messageType, checkpointId);
+          // Always store as regular message for chat history
+          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, 'message');
+          
+          // If response has steps, also store as explorer type with checkpoint ID
+          if (response.steps && response.steps.length > 0) {
+            await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, 'explorer', response.thread_id);
+          }
         }
         
         return detailedResponse;
@@ -324,11 +330,14 @@ const ChatWithApproval: React.FC = () => {
         }
         
         // Store assistant response in chat history
-        // If response has steps, store as explorer type with checkpoint ID
         if (selectedChatThreadId) {
-          const messageType = response.steps && response.steps.length > 0 ? 'explorer' : 'message';
-          const checkpointId = messageType === 'explorer' ? response.thread_id : undefined;
-          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, messageType, checkpointId);
+          // Always store as regular message for chat history
+          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, 'message');
+          
+          // If response has steps, also store as explorer type with checkpoint ID
+          if (response.steps && response.steps.length > 0) {
+            await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, 'explorer', response.thread_id);
+          }
         }
         
         return detailedResponse;

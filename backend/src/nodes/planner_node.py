@@ -145,16 +145,17 @@ class PlannerNode:
                             Format your response as a clear, numbered plan with proper line breaks between steps. Each step should be on its own line starting with a number."""
 
         try:
-      
-            llm_with_tools = self.llm.bind_tools(self.tools)
-            
+
+            tool_descriptions = "\n".join([f"- {tool.name}: {tool.description}" for tool in self.tools])
+
             planning_messages = [
                 SystemMessage(content="You are a helpful database query planner. You can see what tools are available but should only create a plan, not execute tools."),
                 SystemMessage(content="CRITICAL: DO NOT EXECUTE ANY TOOLS. You are ONLY allowed to create planning steps and analyze the query. Tool execution is strictly forbidden and will cause errors."),
+                SystemMessage(content=f"Available tools for planning:\n{tool_descriptions}"),
                 SystemMessage(content=planning_prompt)
             ]
             
-            response = llm_with_tools.invoke(planning_messages)
+            response = self.llm.invoke(planning_messages)
             plan = response.content
             
         except Exception as e:

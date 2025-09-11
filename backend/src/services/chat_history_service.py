@@ -11,6 +11,7 @@ from src.models.chat_models import (
     CreateChatRequest,
     AddMessageRequest
 )
+from src.services.checkpoint_service import CheckpointService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,8 @@ class ChatHistoryService:
     def __init__(self, database: Database):
         self.db = database
         self.collection: Collection = self.db.chat_threads
+        # Initialize checkpoint service for cleanup operations
+        self.checkpoint_service = CheckpointService(database)
         # Create indexes for better performance
         self._create_indexes()
     
@@ -167,8 +170,20 @@ class ChatHistoryService:
     async def delete_thread(self, thread_id: str) -> bool:
         try:
             result = self.collection.delete_one({"thread_id": thread_id})
+            
             if result.deleted_count > 0:
                 logger.info(f"Deleted chat thread: {thread_id}")
+                
+                # Also delete associated checkpoint data
+                try:
+                    checkpoint_result = await self.checkpoint_service.delete_all_thread_data(thread_id)
+                    total_deleted = checkpoint_result.get('total_deleted', 0)
+                    if total_deleted > 0:
+                        logger.info(f"Deleted {total_deleted} checkpoint records for thread {thread_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete checkpoint data for thread {thread_id}: {e}")
+                    # Don't fail the whole operation if checkpoint cleanup fails
+                
                 return True
             else:
                 logger.warning(f"Thread {thread_id} not found for deletion")

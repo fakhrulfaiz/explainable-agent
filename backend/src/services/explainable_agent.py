@@ -14,7 +14,6 @@ import os
 from datetime import datetime
 from pydantic import BaseModel, Field
 from src.models.database import get_mongo_memory
-
 try:
     from explainer import Explainer
     from nodes.planner_node import PlannerNode

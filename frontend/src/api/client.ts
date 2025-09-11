@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 
 // API client configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_TIMEOUT = Number(import.meta.env.VITE_API_TIMEOUT ?? 120000);
 
 class ApiClient {
   private client: AxiosInstance;
@@ -9,7 +10,7 @@ class ApiClient {
   constructor() {
     this.client = axios.create({
       baseURL: API_BASE_URL,
-      timeout: 30000,
+      timeout: API_TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
       },
