@@ -22,11 +22,18 @@ class Settings(BaseSettings):
     cors_methods: List[str] = ["*"]
     cors_headers: List[str] = ["*"]
     
+    # LLM Provider Selection
+    llm_provider: str = "openai"  # options: openai, ollama
+
     # OpenAI Configuration
-    openai_api_key: str
+    openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
-    deepseek_api_key: str
+    # Ollama Configuration
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.1:8b"
+
+    deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
     
     # LangSmith Configuration
