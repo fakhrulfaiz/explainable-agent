@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
+from .status_enums import ExecutionStatusType, ApprovalStatusType, validate_execution_status, validate_approval_status
 from datetime import datetime
 
 
@@ -87,18 +88,41 @@ class StartRequest(BaseModel):
 
 class ResumeRequest(BaseModel):
     thread_id: str = Field(..., description="Thread ID of the graph execution to resume")
-    review_action: str = Field(..., description="Action to take: 'approved', 'feedback', or 'cancelled'")
+    review_action: ApprovalStatusType = Field(..., description="Human review action: 'approved', 'feedback', or 'cancelled'")
     human_comment: Optional[str] = Field(None, description="Optional human comment or feedback")
+    
+    @validator('review_action')
+    def validate_review_action(cls, v):
+        return validate_approval_status(v)
 
 
 class GraphResponse(BaseModel):
     thread_id: str
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID")
-    run_status: str = Field(..., description="Status: 'user_feedback', 'finished', or 'error'")
+    run_status: str = Field(..., description="Graph execution status: 'user_feedback', 'finished', or 'error'")
     assistant_response: Optional[str] = Field(None, description="Current assistant response or plan")
+    query: Optional[str] = Field(None, description="Original user query/request")
     plan: Optional[str] = Field(None, description="Current execution plan")
     error: Optional[str] = Field(None, description="Error message if any")
     steps: Optional[List[StepExplanation]] = Field(None, description="Execution steps if completed")
     final_result: Optional[FinalResult] = Field(None, description="Final structured result if completed")
     total_time: Optional[float] = Field(None, description="Total execution time if completed")
-    overall_confidence: Optional[float] = Field(None, description="Overall confidence score if completed") 
+    overall_confidence: Optional[float] = Field(None, description="Overall confidence score if completed")
+
+
+class GraphStatusResponse(BaseModel):
+
+    thread_id: str
+    execution_status: ExecutionStatusType = Field(..., description="Graph execution state: 'user_feedback', 'running', or 'finished'")
+    next_nodes: List[str] = Field(default_factory=list, description="Next nodes to execute")
+    plan: str = Field(default="", description="Current execution plan")
+    step_count: int = Field(default=0, description="Number of steps completed")
+    approval_status: ApprovalStatusType = Field(default="unknown", description="Agent approval state: 'approved', 'feedback', or 'cancelled'")
+    
+    @validator('execution_status')
+    def validate_execution_status(cls, v):
+        return validate_execution_status(v)
+    
+    @validator('approval_status')
+    def validate_approval_status(cls, v):
+        return validate_approval_status(v) 

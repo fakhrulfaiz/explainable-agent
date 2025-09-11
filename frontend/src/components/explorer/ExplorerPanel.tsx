@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import StepDetails, { ExplorerStep } from '../StepDetails';
 import '../../styles/scrollbar.css';
+import { getStatusDisplayName, getStatusColor } from '../../utils/statusHelpers';
+import { markdownComponents } from '../../utils/markdownComponents';
 
 
 
@@ -33,7 +36,18 @@ type ExplorerPanelProps = {
 };
 
 const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, initialWidthPx = 620, minWidthPx = 320, maxWidthPx = 1100}) => {
-  const [width, setWidth] = useState<number>(initialWidthPx);
+  // Calculate responsive initial width based on screen size
+  const getResponsiveWidth = () => {
+    const screenWidth = window.innerWidth;
+    if (screenWidth <= 768) { // Mobile breakpoint
+      return Math.min(screenWidth - 32, maxWidthPx); // Leave 16px margin on each side
+    } else if (screenWidth <= 1024) { // Tablet breakpoint
+      return Math.min(screenWidth * 0.8, initialWidthPx); // 80% of screen width or default
+    }
+    return initialWidthPx; // Desktop uses original default
+  };
+
+  const [width, setWidth] = useState<number>(getResponsiveWidth());
   const isResizingRef = useRef<boolean>(false);
 
   const onMouseMove = useCallback((e: MouseEvent) => {
@@ -41,6 +55,13 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
     const newWidth = Math.min(Math.max(window.innerWidth - e.clientX, minWidthPx), maxWidthPx);
     setWidth(newWidth);
   }, [minWidthPx, maxWidthPx]);
+
+  // Handle window resize to update panel width responsively
+  const handleWindowResize = useCallback(() => {
+    if (!isResizingRef.current) { 
+      setWidth(getResponsiveWidth());
+    }
+  }, []);
 
   const onMouseUp = useCallback(() => {
     isResizingRef.current = false;
@@ -58,28 +79,36 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
   useEffect(() => {
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('resize', handleWindowResize);
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('resize', handleWindowResize);
     };
-  }, [onMouseMove, onMouseUp]);
+  }, [onMouseMove, onMouseUp, handleWindowResize]);
 
   return (
     <div
         className={`fixed top-0 right-0 h-full bg-white shadow-xl border-l border-gray-200 transform transition-transform duration-300 ease-in-out z-40 ${open ? 'translate-x-0' : 'translate-x-full'}`}
         style={{ width , paddingTop: '4rem' }}
       >
-        {/* Resize handle */}
+        {/* Resize handle - hidden on mobile */}
         <div
           onMouseDown={startResize}
-          className="absolute left-0 top-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-gray-200/50"
+          className="absolute left-0 top-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-gray-200/50 hidden sm:block"
           aria-label="Resize"
         />
 
         <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
           <h3 className="font-semibold text-gray-900">Agent Explorer</h3>
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm">Close</button>
+            <button 
+              onClick={onClose} 
+              className="px-3 py-2 rounded bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm sm:text-sm min-h-[36px] touch-manipulation"
+              aria-label="Close panel"
+            >
+              Close
+            </button>
           </div>
         </div>
 
@@ -109,7 +138,11 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
             <div className="p-3 bg-green-50 rounded border border-green-200">
               <div className="text-base text-gray-800 font-medium mb-1">Summary</div>
               <div className="text-gray-700 text-base">
-                {data.final_result?.summary || data.assistant_response || '—'}
+                {data.final_result?.summary || data.assistant_response ? (
+                  <ReactMarkdown components={markdownComponents}>
+                    {data.final_result?.summary || data.assistant_response || ''}
+                  </ReactMarkdown>
+                ) : '—'}
               </div>
             </div>
 
@@ -117,7 +150,11 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
             {data.plan && (
               <div className="p-3 bg-blue-50 rounded border border-blue-200">
                 <div className="text-base text-gray-800 font-medium mb-1">Plan</div>
-                <pre className="text-sm whitespace-pre-wrap text-gray-700">{data.plan}</pre>
+                <div className="text-sm text-gray-700">
+                  <ReactMarkdown components={markdownComponents}>
+                    {data.plan}
+                  </ReactMarkdown>
+                </div>
               </div>
             )}
 
@@ -125,7 +162,11 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
             {data.final_result?.details && (
               <div className="p-3 bg-gray-50 rounded border border-gray-200">
                 <div className="text-base text-gray-800 font-medium mb-1">Details</div>
-                <div className="text-sm text-gray-700">{data.final_result.details}</div>
+                <div className="text-sm text-gray-700">
+                  <ReactMarkdown components={markdownComponents}>
+                    {data.final_result.details}
+                  </ReactMarkdown>
+                </div>
               </div>
             )}
 
@@ -135,8 +176,10 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
             {/* Meta */}
             <div className="grid grid-cols-2 gap-2 text-sm text-gray-700">
               <div className="p-2 bg-gray-50 rounded border border-gray-200">
-                <div className="text-gray-500">Status</div>
-                <div className="font-medium">{data.run_status}</div>
+                <div className="text-gray-500">Execution Status</div>
+                <div className={`font-medium px-2 py-1 rounded text-sm ${getStatusColor(data.run_status)}`}>
+                  {getStatusDisplayName(data.run_status)}
+                </div>
               </div>
               <div className="p-2 bg-gray-50 rounded border border-gray-200">
                 <div className="text-gray-500">Confidence</div>
@@ -148,7 +191,7 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
               </div>
               <div className="p-2 bg-gray-50 rounded border border-gray-200">
                 <div className="text-gray-500">Thread</div>
-                <div className="font-medium">{data.thread_id?.slice(0, 8)}...</div>
+                <div className="font-medium">{data.thread_id}...</div>
               </div>
             </div>
             </div>

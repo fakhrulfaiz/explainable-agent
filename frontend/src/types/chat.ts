@@ -10,7 +10,7 @@ export interface Message {
   isFeedback?: boolean;
   hasTimedOut?: boolean;
   canRetry?: boolean;
-  retryAction?: 'approve' | 'disapprove' | 'cancel';
+  retryAction?: 'approve' | 'feedback' | 'cancel';
   threadId?: string;
   messageType?: 'message' | 'explorer';
   checkpointId?: string;
@@ -21,12 +21,22 @@ export interface Message {
   };
 }
 
+// Response object that handlers can return
+export interface HandlerResponse {
+  message: string;
+  explorerData?: any;
+  // Future extensibility:
+  // attachments?: File[];
+  // metadata?: Record<string, any>;
+  // actions?: ActionButton[];
+}
+
 export interface ChatComponentProps {
-  onSendMessage: (message: string, messageHistory: Message[]) => Promise<string>;
-  onApprove?: (content: string, message: Message) => Promise<string | void> | string | void;
-  onDisapprove?: (content: string, message: Message) => Promise<string | void> | string | void;
-  onCancel?: (content: string, message: Message) => Promise<string | void> | string | void;
-  onRetry?: (message: Message) => Promise<string | void> | string | void;
+  onSendMessage: (message: string, messageHistory: Message[]) => Promise<string | HandlerResponse>;
+  onApprove?: (content: string, message: Message) => Promise<string | HandlerResponse | void> | string | HandlerResponse | void;
+  onFeedback?: (content: string, message: Message) => Promise<string | HandlerResponse | void> | string | HandlerResponse | void;
+  onCancel?: (content: string, message: Message) => Promise<string | HandlerResponse | void> | string | HandlerResponse | void;
+  onRetry?: (message: Message) => Promise<string | HandlerResponse | void> | string | HandlerResponse | void;
   onMessageCreated?: (messageId: number) => void;
   currentThreadId?: string | null;
   initialMessages?: Message[];
@@ -97,9 +107,9 @@ export interface GraphResponse {
 
 export interface GraphStatus {
   thread_id: string;
-  status: string;
+  execution_status: string; // Graph execution state: 'user_feedback', 'running', 'finished'
   next_nodes: string[];
   plan: string;
   step_count: number;
-  current_status: string;
+  approval_status: string; // Agent approval state: 'approved', 'feedback', 'cancelled'
 }

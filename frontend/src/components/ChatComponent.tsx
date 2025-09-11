@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, ThumbsUp, ThumbsDown, RotateCcw } from 'lucide-react';
-import { Message as MessageType, ChatComponentProps } from '../types/chat';
+import { Message as MessageType, ChatComponentProps, HandlerResponse } from '../types/chat';
 import Message from './Message';
 import FeedbackForm from './FeedbackForm';
 import LoadingIndicator from './LoadingIndicator';
@@ -9,7 +9,7 @@ import '../styles/scrollbar.css';
 const ChatComponent: React.FC<ChatComponentProps> = ({ 
   onSendMessage, 
   onApprove, 
-  onDisapprove,
+  onFeedback,
   onCancel,
   onRetry,
   onMessageCreated,
@@ -40,10 +40,38 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     }
   }, [messages]);
 
+
   // Update messages when initialMessages prop changes
   useEffect(() => {
     setMessages(initialMessages);
   }, [initialMessages]);
+
+  // Helper function to handle response and create explorer message if needed
+  const handleResponse = useCallback((response: string | HandlerResponse): string => {
+    if (typeof response === 'string') {
+      return response;
+    }
+    
+    // If response has explorer data, create explorer message
+    if (response.explorerData) {
+      const explorerMessage: MessageType = {
+        id: Date.now() + 100, // Ensure unique ID
+        role: 'assistant',
+        content: response.message,
+        timestamp: new Date(),
+        messageType: 'explorer',
+        metadata: { explorerData: response.explorerData },
+        threadId: currentThreadId || undefined
+      };
+      
+      // Add explorer message after a short delay to ensure proper ordering
+      setTimeout(() => {
+        setMessages(prev => [...prev, explorerMessage]);
+      }, 50);
+    }
+    
+    return response.message;
+  }, [currentThreadId]);
 
   const handleSend = async (): Promise<void> => {
     if (!inputValue.trim() || isLoading || disabled) return;
@@ -67,11 +95,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       // Call the parent's message handler
       const response = await onSendMessage(userMessage, messages);
       
+      // Handle response (could be string or HandlerResponse)
+      const messageContent = handleResponse(response);
+      
       // Add assistant response
       const assistantMessage: MessageType = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: response,
+        content: messageContent,
         timestamp: new Date(),
         needsApproval: showApprovalButtons,
         threadId: currentThreadId || undefined
@@ -122,12 +153,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       if (onApprove) {
         const result = await onApprove(message.content, message);
         
-        // If the approval handler returns a result, add it as a new message
-        if (result && typeof result === 'string') {
+        if (result) {
+          // Handle response (could be string or HandlerResponse)
+          const messageContent = handleResponse(result);
+          
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: result,
+            content: messageContent,
             timestamp: new Date()
           };
           
@@ -157,7 +190,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
             : m
         ));
       } else {
-        // Add error message for non-timeout errors
         const errorMessage: MessageType = {
           id: Date.now() + 1,
           role: 'assistant',
@@ -173,7 +205,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     }
   };
 
-  const handleDisapprove = async (messageId: number): Promise<void> => {
+  const handleFeedback = async (messageId: number): Promise<void> => {
     const message = messages.find(m => m.id === messageId);
     if (!message) return;
 
@@ -191,18 +223,21 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
 
     try {
       // Call parent handler
-      if (onDisapprove) {
-        const result = await onDisapprove(message.content, message);
+      if (onFeedback) {
+        const result = await onFeedback(message.content, message);
         
-        // If the disapproval handler returns a result, add it as a new message
-        if (result && typeof result === 'string') {
+        // If the feedback handler returns a result, add it as a new message
+        if (result) {
+          // Handle response (could be string or HandlerResponse)
+          const messageContent = handleResponse(result);
+          
           // Check if this is a cancellation message or a new plan
-          const isNewPlan = result.includes('This revised plan requires your approval');
+          const isNewPlan = messageContent.includes('This revised plan requires your approval');
           
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: result,
+            content: messageContent,
             timestamp: new Date(),
             needsApproval: isNewPlan // Only new plans need approval, not cancellations
           };
@@ -236,7 +271,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
                 disapproved: false, 
                 hasTimedOut: true, 
                 canRetry: true, 
-                retryAction: 'disapprove' as const,
+                retryAction: 'feedback' as const,
                 threadId: message.threadId
               }
             : m
@@ -288,17 +323,20 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
 
     try {
       // Use the feedback handler instead of sending a new message
-      if (onDisapprove) {
-        const result = await onDisapprove(feedbackText.trim(), message);
+      if (onFeedback) {
+        const result = await onFeedback(feedbackText.trim(), message);
         
         // If the feedback handler returns a result, add it as a new message
-        if (result && typeof result === 'string') {
-          const isNewPlan = result.includes('This revised plan requires your approval');
+        if (result) {
+          // Handle response (could be string or HandlerResponse)
+          const messageContent = handleResponse(result);
+          
+          const isNewPlan = messageContent.includes('This revised plan requires your approval');
           
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: result,
+            content: messageContent,
             timestamp: new Date(),
             needsApproval: isNewPlan
           };
@@ -353,11 +391,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         const result = await onCancel(message.content, message);
         
         // If the cancel handler returns a result, add it as a new message
-        if (result && typeof result === 'string') {          
+        if (result) {
+          // Handle response (could be string or HandlerResponse)
+          const messageContent = handleResponse(result);
+          
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: result,
+            content: messageContent,
             timestamp: new Date(),
             needsApproval: false // Cancellation messages don't need approval
           };
@@ -417,11 +458,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         const result = await onRetry(message);
         
         // If the retry handler returns a result, add it as a new message
-        if (result && typeof result === 'string') {
+        if (result) {
+          // Handle response (could be string or HandlerResponse)
+          const messageContent = handleResponse(result);
+          
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: result,
+            content: messageContent,
             timestamp: new Date(),
             threadId: currentThreadId || undefined
           };
@@ -432,8 +476,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         // Fallback to local retry logic if no parent handler
         if (message.retryAction === 'approve') {
           await handleApprove(messageId);
-        } else if (message.retryAction === 'disapprove') {
-          await handleDisapprove(messageId);
+        } else if (message.retryAction === 'feedback') {
+          await handleFeedback(messageId);
         }
       }
     } catch (error) {
@@ -550,7 +594,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
               onClick={() => setShowFeedbackForm(true)}
               className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
-              📝 Send Feedback
             </button>
             <button
               onClick={() => handleApprove(pendingApproval)}
@@ -568,7 +611,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
             </button>
           </div>
         ) : !showFeedbackForm ? (
-          // Show regular input when not waiting for approval
           <div className="flex gap-2">
             <input
               ref={inputRef}

@@ -3,7 +3,8 @@ from uuid import uuid4
 from datetime import datetime
 from typing import Annotated
 
-from src.models.schemas import StartRequest, GraphResponse, ResumeRequest
+from src.models.schemas import StartRequest, GraphResponse, GraphStatusResponse, ResumeRequest
+from src.models.status_enums import ExecutionStatus, ApprovalStatus
 from src.services.explainable_agent import ExplainableAgent
 from langchain_core.messages import HumanMessage
 from src.services.explainable_agent import ExplainableAgentState
@@ -43,7 +44,7 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             
         
         if next_nodes and "human_feedback" in next_nodes:
-            run_status = "user_feedback"
+            execution_status = ExecutionStatus.USER_FEEDBACK
             # Get the plan from current state for user review
             current_values = state.values
             
@@ -54,12 +55,12 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                 thread_id=thread_id,
                 checkpoint_id=checkpoint_id,
                 query=query,
-                run_status=run_status,
+                run_status=execution_status, 
                 assistant_response=assistant_response,
                 plan=plan
             )
         else:
-            run_status = "finished"
+            execution_status = ExecutionStatus.FINISHED
             
             # Extract the response from the final state
             final_values = state.values
@@ -111,7 +112,7 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                 thread_id=thread_id,
                 checkpoint_id=checkpoint_id,
                 query=query,
-                run_status=run_status,
+                run_status=execution_status,
                 assistant_response=assistant_response,
                 plan=plan,
                 steps=steps,
@@ -190,7 +191,7 @@ def resume_graph(
         raise HTTPException(status_code=500, detail=f"Error resuming graph: {str(e)}")
 
 
-@router.get("/status/{thread_id}")
+@router.get("/status/{thread_id}", response_model=GraphStatusResponse)
 def get_graph_status(
     thread_id: str,
     agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
@@ -207,20 +208,20 @@ def get_graph_status(
         values = state.values
         
         if next_nodes and "human_feedback" in next_nodes:
-            status = "user_feedback"
+            execution_status = ExecutionStatus.USER_FEEDBACK
         elif next_nodes:
-            status = "running"
+            execution_status = ExecutionStatus.RUNNING
         else:
-            status = "finished"
+            execution_status = ExecutionStatus.FINISHED
         
-        return {
-            "thread_id": thread_id,
-            "status": status,
-            "next_nodes": list(next_nodes) if next_nodes else [],
-            "plan": values.get("plan", ""),
-            "step_count": len(values.get("steps", [])),
-            "current_status": values.get("status", "unknown")
-        }
+        return GraphStatusResponse(
+            thread_id=thread_id,
+            execution_status=execution_status,  # Graph execution state
+            next_nodes=list(next_nodes) if next_nodes else [],
+            plan=values.get("plan", ""),
+            step_count=len(values.get("steps", [])),
+            approval_status=values.get("status", ApprovalStatus.UNKNOWN)  # Agent approval state
+        )
         
     except Exception as e:
         if "thread_id" in str(e).lower() or "not found" in str(e).lower():
@@ -277,7 +278,7 @@ def get_agent_state_via_agent(
                 "steps_count": len(values.get("steps", [])) if isinstance(values.get("steps"), list) else 0,
                 "plan": values.get("plan", ""),
                 "query": values.get("query", ""),
-                "status": values.get("status", "unknown"),
+                "approval_status": values.get("status", "unknown"),
                 "step_counter": values.get("step_counter", 0),
                 "has_human_comment": bool(values.get("human_comment")),
                 "assistant_response": values.get("assistant_response", "")
@@ -314,7 +315,7 @@ def restore_agent_state(
         
         return {
             "thread_id": thread_id,
-            "status": "restored",
+            "operation_status": "restored",
             "has_state": True,
             "next_nodes": list(next_nodes) if next_nodes else [],
             "restored_data": {
@@ -322,7 +323,7 @@ def restore_agent_state(
                 "steps_count": len(values.get("steps", [])) if isinstance(values.get("steps"), list) else 0,
                 "plan": values.get("plan", ""),
                 "query": values.get("query", ""),
-                "status": values.get("status", "unknown"),
+                "approval_status": values.get("status", "unknown"),
                 "step_counter": values.get("step_counter", 0)
             }
         }

@@ -55,7 +55,7 @@ export class GraphService {
   static async hasActiveGraph(threadId: string): Promise<boolean> {
     try {
       const response = await this.getGraphStatus(threadId);
-      return response.status === 'running' || response.status === 'user_feedback';
+      return response.execution_status === 'running' || response.execution_status === 'user_feedback';
     } catch (error) {
       // If we can't get the status, assume no active graph
       return false;

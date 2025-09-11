@@ -35,10 +35,10 @@ const Demo: React.FC = () => {
     // Here you could send approval to your backend
   };
 
-  // Handle disapproval
-  const handleDisapprove = async (content: string, message: Message): Promise<void> => {
-    console.log('Disapproved message:', { content, message });
-    // Here you could send disapproval to your backend
+  // Handle feedback
+  const handleFeedback = async (content: string, message: Message): Promise<void> => {
+    console.log('Feedback on message:', { content, message });
+    // Here you could send feedback to your backend
   };
 
   return (
@@ -65,7 +65,7 @@ const Demo: React.FC = () => {
                 key={`chat-approval-${chatKey}`}
                 onSendMessage={handleSendMessage}
                 onApprove={handleApprove}
-                onDisapprove={handleDisapprove}
+                onFeedback={handleFeedback}
                 placeholder="Ask me anything..."
                 showApprovalButtons={true}
                 className="h-full"

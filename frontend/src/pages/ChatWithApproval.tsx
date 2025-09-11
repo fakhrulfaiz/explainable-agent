@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChatComponent, ExplorerPanel } from '../components';
 import ChatThreadSelector from '../components/ChatThreadSelector';
-import { Message } from '../types/chat';
+import { Message, HandlerResponse } from '../types/chat';
 import { GraphService } from '../api/services/graphService';
 import { ExplorerService } from '../api/services/explorerService';
 import { ChatHistoryService } from '../api/services/chatHistoryService';
@@ -127,7 +127,7 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (message: string, messageHistory: Message[]): Promise<string> => {
+  const handleSendMessage = async (message: string, messageHistory: Message[]): Promise<string | HandlerResponse> => {
     // Clear previous explorer data when starting a new request
     setExplorerData(null);
     setExplorerOpen(false);
@@ -187,6 +187,15 @@ const ChatWithApproval: React.FC = () => {
         
         setExplorerData(response);
         setExplorerOpen(true);
+        
+        // Return response object with explorer data if steps are available
+        if (response.steps && response.steps.length > 0) {
+          return {
+            message: assistantResponse,
+            explorerData: response
+          };
+        }
+        
         return assistantResponse;
       } else if (response.run_status === 'error') {
         throw new Error(response.error || 'An error occurred while processing your request.');
@@ -201,8 +210,8 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  // Handle approval
-  const handleApprove = async (_content: string, message: Message): Promise<string> => {
+
+  const handleApprove = async (_content: string, message: Message): Promise<string | HandlerResponse> => {
     console.log('Approval attempt:', { pendingApproval, messageId: message.id });
     
     // Use current thread if available, or try to approve the message if it needs approval
@@ -249,6 +258,14 @@ const ChatWithApproval: React.FC = () => {
           }
         }
         
+        // Return response object with explorer data if steps are available
+        if (response.steps && response.steps.length > 0) {
+          return {
+            message: detailedResponse,
+            explorerData: response
+          };
+        }
+        
         return detailedResponse;
         
       } else if (response.run_status === 'error') {
@@ -270,10 +287,9 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  const handleDisapprove = async (content: string, message: Message): Promise<string> => {
+  const handleFeedback = async (content: string, message: Message): Promise<string | HandlerResponse> => {
     console.log('Feedback attempt:', { pendingApproval, messageId: message.id, feedback: content });
     
-    // Use current thread if available, or try to provide feedback for the message
     const threadId = pendingApproval?.threadId || currentThreadId;
     
     if (!threadId) {
@@ -283,7 +299,7 @@ const ChatWithApproval: React.FC = () => {
     try {
       console.log('Providing feedback for thread:', threadId);
       
-      // Provide feedback and continue execution
+      
       const response = await GraphService.provideFeedbackAndContinue(threadId, content);
       
       // Clear pending approval
@@ -338,6 +354,14 @@ const ChatWithApproval: React.FC = () => {
           if (response.steps && response.steps.length > 0) {
             await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, 'explorer', response.thread_id);
           }
+        }
+        
+        // Return response object with explorer data if steps are available
+        if (response.steps && response.steps.length > 0) {
+          return {
+            message: detailedResponse,
+            explorerData: response
+          };
         }
         
         return detailedResponse;
@@ -403,7 +427,7 @@ const ChatWithApproval: React.FC = () => {
       if (message.retryAction === 'approve') {
         console.log('Retrying approval for thread:', threadId);
         response = await GraphService.approveAndContinue(threadId);
-      } else if (message.retryAction === 'disapprove') {
+      } else if (message.retryAction === 'feedback') {
         console.log('Retrying feedback for thread:', threadId);
         response = await GraphService.provideFeedbackAndContinue(threadId, 'Retrying previous action');
       } else {
@@ -557,11 +581,11 @@ const ChatWithApproval: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-semibold text-gray-900">Explainable Agent</h2>
-                  <p className="text-sm text-gray-600">Messages require approval/disapproval for AI learning</p>
+              
                 </div>
                 {selectedChatThreadId && (
                   <div className="text-xs text-gray-500">
-                    Chat ID: {selectedChatThreadId.slice(0, 8)}...
+                    Chat ID: {selectedChatThreadId}
                   </div>
                 )}
               </div>
@@ -571,7 +595,7 @@ const ChatWithApproval: React.FC = () => {
                 key={`chat-approval-${chatKey}`}
                 onSendMessage={handleSendMessage}
                 onApprove={handleApprove}
-                onDisapprove={handleDisapprove}
+                onFeedback={handleFeedback}
                 onCancel={handleCancel}
                 onRetry={handleRetry}
                 onMessageCreated={handleMessageCreated}
@@ -586,29 +610,11 @@ const ChatWithApproval: React.FC = () => {
           </div>
         </div>
 
-        {/* Controls */}
+
         <div className="mt-4 text-center">
-          <button
-            onClick={handleNewThread}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mr-4"
-          >
-            New Thread
-          </button>
-          <button
-            onClick={() => {
-              setChatKey(prev => prev + 1);
-              setCurrentThreadId(null);
-              setPendingApproval(null);
-              setExplorerData(null);
-              setExplorerOpen(false);
-            }}
-            className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors mr-4"
-          >
-            Reset Chat
-          </button>
           {currentThreadId && (
             <span className="text-xs text-gray-500 mr-4">
-              Graph Thread: {currentThreadId.slice(0, 8)}...
+              Graph Thread: {currentThreadId}
             </span>
           )}
           {pendingApproval && (
@@ -618,12 +624,9 @@ const ChatWithApproval: React.FC = () => {
           )}
           {loadingThread && (
             <span className="text-xs text-blue-600 mr-4">
-              📂 Loading thread...
+              Loading thread...
             </span>
           )}
-          <span className="text-sm text-gray-500">
-            💡 Select a thread above or ask database questions to see the approval workflow
-          </span>
         </div>
       </div>
       {/* Slide-out Explorer Panel */}

@@ -63,16 +63,20 @@ Resumes execution after human feedback.
 
 Gets the current status of a graph execution.
 
+**Status Field Explanations:**
+- `execution_status`: Graph execution state (`user_feedback`, `running`, `finished`)
+- `approval_status`: Human approval state (`approved`, `feedback`, `cancelled`)
+
 **Response:**
 
 ```json
 {
   "thread_id": "uuid-string",
-  "status": "user_feedback",
+  "execution_status": "user_feedback",
   "next_nodes": ["human_feedback"],
   "plan": "Current plan...",
   "step_count": 2,
-  "current_status": "approved"
+  "approval_status": "approved"
 }
 ```
 
