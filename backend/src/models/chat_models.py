@@ -9,6 +9,8 @@ class ChatMessage(BaseModel):
     sender: Literal["user", "assistant"] = Field(..., description="Message sender")
     content: str = Field(..., description="Message content")
     timestamp: datetime = Field(default_factory=datetime.now, description="Message timestamp")
+    message_type: Literal["message", "explorer"] = Field(default="message", description="Message type - message or explorer")
+    checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
     
     class Config:
         json_encoders = {
@@ -56,6 +58,8 @@ class AddMessageRequest(BaseModel):
     thread_id: str = Field(..., description="Thread ID")
     sender: Literal["user", "assistant"] = Field(..., description="Message sender")
     content: str = Field(..., description="Message content")
+    message_type: Literal["message", "explorer"] = Field(default="message", description="Message type - message or explorer")
+    checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
 
 
 class ChatHistoryResponse(BaseModel):

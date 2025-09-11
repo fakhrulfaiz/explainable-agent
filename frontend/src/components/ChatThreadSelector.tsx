@@ -283,7 +283,6 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
         </div>
       )}
 
-      {/* Click outside to close */}
       {isOpen && (
         <div
           className="fixed inset-0 z-40"

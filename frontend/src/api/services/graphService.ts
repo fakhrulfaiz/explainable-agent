@@ -49,6 +49,19 @@ export class GraphService {
     }
   }
 
+  /**
+   * Check if a thread has an active graph execution
+   */
+  static async hasActiveGraph(threadId: string): Promise<boolean> {
+    try {
+      const response = await this.getGraphStatus(threadId);
+      return response.status === 'running' || response.status === 'user_feedback';
+    } catch (error) {
+      // If we can't get the status, assume no active graph
+      return false;
+    }
+  }
+
 
   static async approveAndContinue(threadId: string): Promise<GraphResponse> {
     return this.resumeGraph({

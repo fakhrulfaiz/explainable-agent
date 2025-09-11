@@ -7,6 +7,7 @@ from src.models.schemas import StartRequest, GraphResponse, ResumeRequest
 from src.services.explainable_agent import ExplainableAgent
 from langchain_core.messages import HumanMessage
 from src.services.explainable_agent import ExplainableAgentState
+from src.models.database import get_mongo_memory, get_mongodb
 
 router = APIRouter(
     prefix="/graph",
@@ -33,6 +34,13 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
         state = explainable_agent.graph.get_state(config)
         next_nodes = state.next
         thread_id = config["configurable"]["thread_id"]
+        checkpoint_id = None
+        query = state.values.get("query", "")
+        if hasattr(state, 'config') and state.config and 'configurable' in state.config:
+            configurable = state.config['configurable']
+            if 'checkpoint_id' in configurable:
+                checkpoint_id = str(configurable['checkpoint_id'])
+            
         
         if next_nodes and "human_feedback" in next_nodes:
             run_status = "user_feedback"
@@ -44,6 +52,8 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             
             return GraphResponse(
                 thread_id=thread_id,
+                checkpoint_id=checkpoint_id,
+                query=query,
                 run_status=run_status,
                 assistant_response=assistant_response,
                 plan=plan
@@ -99,6 +109,8 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             
             return GraphResponse(
                 thread_id=thread_id,
+                checkpoint_id=checkpoint_id,
+                query=query,
                 run_status=run_status,
                 assistant_response=assistant_response,
                 plan=plan,
@@ -109,8 +121,11 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             )
             
     except Exception as e:
+        thread_id = config["configurable"]["thread_id"]
         return GraphResponse(
-            thread_id=config["configurable"]["thread_id"],
+            thread_id=thread_id,
+            checkpoint_id=None,  # No checkpoint_id available on error
+            query=query,
             run_status="error",
             error=str(e)
         )
@@ -211,3 +226,107 @@ def get_graph_status(
         if "thread_id" in str(e).lower() or "not found" in str(e).lower():
             raise HTTPException(status_code=404, detail=f"Graph execution not found for thread_id: {thread_id}")
         raise HTTPException(status_code=500, detail=f"Error getting graph status: {str(e)}")
+
+
+
+@router.get("/state/{thread_id}/agent")
+def get_agent_state_via_agent(
+    thread_id: str,
+    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
+):
+    """
+    Fetch the agent's current state via the compiled graph.
+    If thread exists in MongoDB but not loaded in agent, it will load it first.
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        # Try to get current state from agent
+        state = agent.graph.get_state(config)
+        
+        # If no state found in agent memory, but checkpoints exist in MongoDB,
+        # the agent will automatically load from the checkpointer
+        if not state or not hasattr(state, 'values') or not state.values:
+            # Force a checkpoint load by trying to get state again
+            # The MongoDBSaver should automatically restore from DB
+            state = agent.graph.get_state(config)
+        
+        if not state or not hasattr(state, 'values') or not state.values:
+            raise HTTPException(status_code=404, detail=f"No graph execution found for thread_id: {thread_id}")
+        
+        values = getattr(state, "values", {}) or {}
+        next_nodes = getattr(state, "next", None)
+        
+        # Check if this is a loaded state vs empty state
+        has_meaningful_data = (
+            values.get("messages") or 
+            values.get("plan") or 
+            values.get("query") or
+            values.get("steps")
+        )
+        
+        if not has_meaningful_data:
+            raise HTTPException(status_code=404, detail=f"No meaningful state found for thread_id: {thread_id}")
+        
+        # Summarize values to avoid returning non-serializable objects
+        summary = {
+            "thread_id": thread_id,
+            "has_state": True,
+            "next_nodes": list(next_nodes) if next_nodes else [],
+            "values": {
+                "messages_count": len(values.get("messages", [])) if isinstance(values.get("messages"), list) else 0,
+                "steps_count": len(values.get("steps", [])) if isinstance(values.get("steps"), list) else 0,
+                "plan": values.get("plan", ""),
+                "query": values.get("query", ""),
+                "status": values.get("status", "unknown"),
+                "step_counter": values.get("step_counter", 0),
+                "has_human_comment": bool(values.get("human_comment")),
+                "assistant_response": values.get("assistant_response", "")
+            },
+            "source": "agent.graph.get_state",
+            "loaded_from_checkpoint": True
+        }
+        return summary
+    except HTTPException:
+        raise 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching agent state via agent: {str(e)}")
+
+
+@router.post("/state/{thread_id}/restore")
+def restore_agent_state(
+    thread_id: str,
+    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
+):
+    """
+    Explicitly restore/load a thread's state from MongoDB checkpointer into the agent.
+    Useful after server restart to ensure the agent has the latest state.
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        # Force load from checkpointer by getting state
+        state = agent.graph.get_state(config)
+        
+        if not state or not hasattr(state, 'values') or not state.values:
+            raise HTTPException(status_code=404, detail=f"No checkpoint found for thread_id: {thread_id}")
+        
+        values = state.values
+        next_nodes = state.next
+        
+        return {
+            "thread_id": thread_id,
+            "status": "restored",
+            "has_state": True,
+            "next_nodes": list(next_nodes) if next_nodes else [],
+            "restored_data": {
+                "messages_count": len(values.get("messages", [])) if isinstance(values.get("messages"), list) else 0,
+                "steps_count": len(values.get("steps", [])) if isinstance(values.get("steps"), list) else 0,
+                "plan": values.get("plan", ""),
+                "query": values.get("query", ""),
+                "status": values.get("status", "unknown"),
+                "step_counter": values.get("step_counter", 0)
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error restoring agent state: {str(e)}")

@@ -4,6 +4,8 @@ export interface ChatMessage {
   sender: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  message_type?: 'message' | 'explorer';
+  checkpoint_id?: string;
 }
 
 export interface ChatThread {
@@ -32,6 +34,8 @@ export interface AddMessageRequest {
   thread_id: string;
   sender: 'user' | 'assistant';
   content: string;
+  message_type?: 'message' | 'explorer';
+  checkpoint_id?: string;
 }
 
 export interface ChatHistoryResponse {

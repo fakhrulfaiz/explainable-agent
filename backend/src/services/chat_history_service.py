@@ -2,7 +2,8 @@ from typing import List, Optional
 from datetime import datetime
 from pymongo.collection import Collection
 from pymongo.errors import PyMongoError
-from src.models.database import db
+from src.models.database import get_mongodb
+from pymongo.database import Database
 from src.models.chat_models import (
     ChatThread, 
     ChatMessage, 
@@ -14,12 +15,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class ChatHistoryService:
-   
     
-    def __init__(self):
-        self.collection: Collection = db.chat_threads
+    def __init__(self, database: Database):
+        self.db = database
+        self.collection: Collection = self.db.chat_threads
         # Create indexes for better performance
         self._create_indexes()
     
@@ -72,7 +72,7 @@ class ChatHistoryService:
             raise Exception(f"Failed to create chat thread: {e}")
     
     async def get_thread(self, thread_id: str) -> Optional[ChatThread]:
-        """Get a specific chat thread by ID"""
+      
         try:
             thread_data = self.collection.find_one({"thread_id": thread_id})
             if thread_data:
@@ -86,15 +86,16 @@ class ChatHistoryService:
             raise Exception(f"Failed to retrieve chat thread: {e}")
     
     async def add_message(self, request: AddMessageRequest) -> bool:
-        """Add a message to an existing thread"""
+      
         try:
             message = ChatMessage(
                 sender=request.sender,
                 content=request.content,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
+                message_type=request.message_type,
+                checkpoint_id=request.checkpoint_id
             )
             
-            # Update thread with new message and updated timestamp
             result = self.collection.update_one(
                 {"thread_id": request.thread_id},
                 {
@@ -115,7 +116,6 @@ class ChatHistoryService:
             raise Exception(f"Failed to add message: {e}")
     
     async def get_all_threads(self, limit: int = 50, skip: int = 0) -> List[ChatThreadSummary]:
-        """Get all chat threads with summary information"""
         try:
             cursor = self.collection.find(
                 {},
@@ -165,7 +165,6 @@ class ChatHistoryService:
             raise Exception(f"Failed to retrieve chat threads: {e}")
     
     async def delete_thread(self, thread_id: str) -> bool:
-        """Delete a chat thread"""
         try:
             result = self.collection.delete_one({"thread_id": thread_id})
             if result.deleted_count > 0:
@@ -212,5 +211,5 @@ class ChatHistoryService:
             return 0
 
 
-# Global service instance
-chat_history_service = ChatHistoryService()
+# Note: This service is now used with dependency injection
+# Remove the global instance as it's no longer needed

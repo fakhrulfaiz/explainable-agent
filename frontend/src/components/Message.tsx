@@ -1,12 +1,33 @@
 import React from 'react';
 import { MessageComponentProps } from '../types/chat';
-import ReactMarkdown from 'react-markdown';
+import { MessageRenderer } from './MessageRenderer';
 import { RotateCcw } from 'lucide-react';
 
 const Message: React.FC<MessageComponentProps> = ({ 
   message,
   onRetry
 }) => {
+  const handleAction = (action: string, data?: any) => {
+    switch (action) {
+      case 'openExplorer':
+        // This would need to be passed down from parent component
+        // For now, we'll use a custom event or callback
+        if ((window as any).openExplorer) {
+          (window as any).openExplorer(data);
+        }
+        break;
+    }
+  };
+ 
+  if (message.messageType === 'explorer') {
+    return (
+      <div className="w-full mb-4">
+        <MessageRenderer message={message} onAction={handleAction} />
+      </div>
+    );
+  }
+
+  // Regular message bubble layout
   return (
     <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div className={`max-w-[80%] ${message.role === 'user' ? 'order-2' : 'order-1'}`}>
@@ -27,18 +48,7 @@ const Message: React.FC<MessageComponentProps> = ({
           }`}
         >
           <div className="break-words prose prose-sm max-w-none">
-            <ReactMarkdown
-              components={{
-                p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
-                ol: ({children}) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-                ul: ({children}) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-                li: ({children}) => <li className="text-inherit">{children}</li>,
-                code: ({children}) => <code className="bg-gray-200 px-1 rounded text-sm font-mono">{children}</code>,
-                strong: ({children}) => <strong className="font-semibold">{children}</strong>
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
+            <MessageRenderer message={message} onAction={handleAction} />
           </div>
         </div>
 

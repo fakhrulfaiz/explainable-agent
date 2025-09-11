@@ -10,10 +10,12 @@ from langchain_deepseek import ChatDeepSeek
 from src.models.config import settings
 from src.models.schemas import QueryRequest, QueryResponse
 from src.services.explainable_agent import ExplainableAgent
+from src.services.explainable_agent_copy import ParallelExplainableAgent
 from src.services.simple_agent import SimpleAgent
 from src.services.async_simple_agent import AsyncSimpleAgent
 
-from routers import agent, graph, test_stream, chat_history
+from routers import agent, graph, test_stream, chat_history, explorer
+from src.models.database import mongodb_manager
 
 
 # Lifespan context manager for startup/shutdown events
@@ -48,7 +50,8 @@ async def lifespan(app: FastAPI):
     explainable_agent = ExplainableAgent(
         llm=llm,
         db_path=settings.database_path,
-        logs_dir=settings.logs_dir
+        logs_dir=settings.logs_dir,
+        mongo_memory=mongodb_manager.get_mongo_memory()
     )
     
     simple_agent = SimpleAgent(
@@ -63,16 +66,26 @@ async def lifespan(app: FastAPI):
         logs_dir=settings.logs_dir
     )
     
+    parallel_agent = ParallelExplainableAgent(
+        llm=llm,
+        db_path=settings.database_path,
+        logs_dir=settings.logs_dir,
+        mongo_memory=mongodb_manager.get_mongo_memory()
+    )
+    
     app.state.llm = llm
     app.state.explainable_agent = explainable_agent
     app.state.simple_agent = simple_agent
     app.state.async_simple_agent = async_simple_agent
+    app.state.parallel_agent = parallel_agent
     
     print("All services initialized successfully!")
     
     yield
     
     print("Shutting down Explainable Agent API...")
+    # Close MongoDB connections
+    mongodb_manager.close()
     
 
 
@@ -99,6 +112,7 @@ app.include_router(agent.router)
 app.include_router(graph.router)
 app.include_router(test_stream.router)
 app.include_router(chat_history.router)
+app.include_router(explorer.router)
 
 @app.get("/")
 async def root():
@@ -117,6 +131,9 @@ def get_simple_agent(request: Request) -> SimpleAgent:
 
 def get_async_simple_agent(request: Request) -> AsyncSimpleAgent:
     return request.app.state.async_simple_agent
+
+def get_parallel_agent(request: Request) -> ParallelExplainableAgent:
+    return request.app.state.parallel_agent
 
 # Routes with Dependency Injection
 @app.get("/health")

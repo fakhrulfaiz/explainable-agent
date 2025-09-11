@@ -3,6 +3,7 @@ import { ChatComponent, ExplorerPanel } from '../components';
 import ChatThreadSelector from '../components/ChatThreadSelector';
 import { Message } from '../types/chat';
 import { GraphService } from '../api/services/graphService';
+import { ExplorerService } from '../api/services/explorerService';
 import { ChatHistoryService } from '../api/services/chatHistoryService';
 
 const ChatWithApproval: React.FC = () => {
@@ -27,9 +28,70 @@ const ChatWithApproval: React.FC = () => {
       content: msg.content,
       timestamp: new Date(msg.timestamp),
       needsApproval: false, // Historical messages don't need approval
-      threadId: selectedChatThreadId || undefined
+      threadId: selectedChatThreadId || undefined,
+      messageType: msg.message_type as 'message' | 'explorer' || 'message',
+      checkpointId: msg.checkpoint_id
     }));
   };
+
+  const restoreExplorerDataIfNeeded = async (messages: Message[], threadId: string) => {
+    // Find the last explorer message (most recent one)
+    const explorerMessages = messages.filter(msg => 
+      msg.messageType === 'explorer' && 
+      msg.checkpointId && 
+      msg.role === 'assistant'
+    );
+
+    if (explorerMessages.length > 0) {
+      // Get the most recent explorer message
+      const lastExplorerMessage = explorerMessages[explorerMessages.length - 1];
+      
+      try {
+        console.log('Restoring explorer data for checkpoint:', lastExplorerMessage.checkpointId);
+        console.log('Using thread_id:', threadId);
+        
+        // Fetch explorer data using the checkpoint_id and provided thread_id
+        const explorerData = await ExplorerService.getExplorerData(
+          threadId,
+          lastExplorerMessage.checkpointId!
+        );
+        
+        if (explorerData) {
+          setExplorerData(explorerData);
+          
+          // Update the restored messages to include explorer data in metadata
+          setRestoredMessages(prevMessages => 
+            prevMessages.map(msg => 
+              msg.id === lastExplorerMessage.id 
+                ? { ...msg, metadata: { explorerData } }
+                : msg
+            )
+          );
+          
+          console.log('Explorer data restored successfully');
+        }
+      } catch (error) {
+        console.error('Failed to restore explorer data:', error);
+        // Don't show error to user, just log it
+      }
+    }
+  };
+
+  // Function to handle explorer opening from messages
+  const handleOpenExplorer = (data: any) => {
+    if (data) {
+      setExplorerData(data);
+      setExplorerOpen(true);
+    }
+  };
+
+  // Add to window for global access from Message components
+  React.useEffect(() => {
+    (window as any).openExplorer = handleOpenExplorer;
+    return () => {
+      delete (window as any).openExplorer;
+    };
+  }, []);
 
   
   const createNewChatThread = async (initialMessage?: string): Promise<string> => {
@@ -44,13 +106,21 @@ const ChatWithApproval: React.FC = () => {
       throw error;
     }
   };
-
-  const storeMessage = async (chatThreadId: string, sender: 'user' | 'assistant', content: string) => {
+ 
+  const storeMessage = async (
+    chatThreadId: string, 
+    sender: 'user' | 'assistant', 
+    content: string, 
+    messageType: 'message' | 'explorer' = 'message',
+    checkpointId?: string
+  ) => {
     try {
       await ChatHistoryService.addMessage({
         thread_id: chatThreadId,
         sender,
-        content
+        content,
+        message_type: messageType,
+        checkpoint_id: checkpointId
       });
     } catch (error) {
       console.error('Error storing message:', error);
@@ -72,6 +142,12 @@ const ChatWithApproval: React.FC = () => {
         await storeMessage(chatThreadId, 'user', message);
       }
 
+      // Check if there's already an active graph execution for this thread
+      const hasActiveGraph = await GraphService.hasActiveGraph(chatThreadId);
+      if (hasActiveGraph) {
+        throw new Error('There\'s already an active graph execution for this thread. Please wait for it to complete or provide feedback.');
+      }
+
       const response = await GraphService.startGraph({
         human_request: message,
         thread_id: chatThreadId
@@ -81,6 +157,7 @@ const ChatWithApproval: React.FC = () => {
 
       if (response.run_status === 'user_feedback') {
         // Need human approval for the plan
+        
         const plan = response.plan || response.assistant_response || 'Plan generated - awaiting approval';
         const assistantResponse = `**Plan for your request:**\n\n${plan}\n\n**This plan requires your approval before execution.**`;
         
@@ -100,7 +177,10 @@ const ChatWithApproval: React.FC = () => {
         const assistantResponse = response.assistant_response || 'Task completed successfully.';
         
         // Store assistant response in chat history
-        await storeMessage(chatThreadId, 'assistant', assistantResponse);
+        // If response has steps, store as explorer type with checkpoint ID
+        const messageType = response.steps && response.steps.length > 0 ? 'explorer' : 'message';
+        const checkpointId = messageType === 'explorer' ? response.thread_id : undefined;
+        await storeMessage(chatThreadId, 'assistant', assistantResponse, messageType, checkpointId);
         
         setExplorerData(response);
         setExplorerOpen(true);
@@ -156,8 +236,11 @@ const ChatWithApproval: React.FC = () => {
         }
         
         // Store assistant response in chat history
+        // If response has steps, store as explorer type with checkpoint ID
         if (selectedChatThreadId) {
-          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse);
+          const messageType = response.steps && response.steps.length > 0 ? 'explorer' : 'message';
+          const checkpointId = messageType === 'explorer' ? response.thread_id : undefined;
+          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, messageType, checkpointId);
         }
         
         return detailedResponse;
@@ -168,7 +251,9 @@ const ChatWithApproval: React.FC = () => {
         const assistantResponse = response.assistant_response || 'Execution in progress...';
         // Store assistant response in chat history
         if (selectedChatThreadId) {
-          await storeMessage(selectedChatThreadId, 'assistant', assistantResponse);
+          const messageType = response.steps && response.steps.length > 0 ? 'explorer' : 'message';
+          const checkpointId = messageType === 'explorer' ? response.thread_id : undefined;
+          await storeMessage(selectedChatThreadId, 'assistant', assistantResponse, messageType, checkpointId);
         }
         return assistantResponse;
       }
@@ -209,7 +294,7 @@ const ChatWithApproval: React.FC = () => {
           messageId: 0 // Will be updated by onMessageCreated callback
         });
         
-        const revisedResponse = `**Revised Plan:**\n\n${newPlan}\n\n⚠️ **This revised plan requires your approval before execution.**`;
+        const revisedResponse = `**Revised Plan:**\n\n${newPlan}\n\n**This revised plan requires your approval before execution.**`;
         
         // Store feedback and revised plan in chat history
         if (selectedChatThreadId) {
@@ -239,8 +324,11 @@ const ChatWithApproval: React.FC = () => {
         }
         
         // Store assistant response in chat history
+        // If response has steps, store as explorer type with checkpoint ID
         if (selectedChatThreadId) {
-          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse);
+          const messageType = response.steps && response.steps.length > 0 ? 'explorer' : 'message';
+          const checkpointId = messageType === 'explorer' ? response.thread_id : undefined;
+          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse, messageType, checkpointId);
         }
         
         return detailedResponse;
@@ -332,6 +420,11 @@ const ChatWithApproval: React.FC = () => {
           }
         }
         
+        // Store the retry response in chat history
+        if (selectedChatThreadId) {
+          await storeMessage(selectedChatThreadId, 'assistant', detailedResponse);
+        }
+        
         return detailedResponse;
         
       } else if (response.run_status === 'user_feedback') {
@@ -343,13 +436,27 @@ const ChatWithApproval: React.FC = () => {
           messageId: 0 // Will be updated by onMessageCreated callback
         });
         
-        return `**Plan after retry:**\n\n${newPlan}\n\n⚠️ **This plan requires your approval before execution.**`;
+        const planMessage = `**Plan after retry:**\n\n${newPlan}\n\n⚠️ **This plan requires your approval before execution.**`;
+        
+        // Store the retry plan response in chat history
+        if (selectedChatThreadId) {
+          await storeMessage(selectedChatThreadId, 'assistant', planMessage);
+        }
+        
+        return planMessage;
         
       } else if (response.run_status === 'error') {
         throw new Error(response.error || 'An error occurred during retry');
       }
       
-      return response.assistant_response || 'Retry completed.';
+      const fallbackResponse = response.assistant_response || 'Retry completed.';
+      
+      // Store the fallback retry response in chat history
+      if (selectedChatThreadId) {
+        await storeMessage(selectedChatThreadId, 'assistant', fallbackResponse);
+      }
+      
+      return fallbackResponse;
       
     } catch (error) {
       console.error('Error during retry:', error);
@@ -380,18 +487,27 @@ const ChatWithApproval: React.FC = () => {
         const convertedMessages = convertChatHistoryToMessages(thread.messages || []);
         setRestoredMessages(convertedMessages);
         
+        // Reset current states first
+        setCurrentThreadId(null);
+        setPendingApproval(null);
+        setExplorerData(null);
+        setExplorerOpen(false);
+        
         setChatKey(prev => prev + 1);
+        
+        // After messages are restored, check if we need to restore explorer data
+        await restoreExplorerDataIfNeeded(convertedMessages, threadId);
       } else {
         // Clear selection and messages
         setRestoredMessages([]);
         setChatKey(prev => prev + 1);
+        
+        // Reset current states
+        setCurrentThreadId(null);
+        setPendingApproval(null);
+        setExplorerData(null);
+        setExplorerOpen(false);
       }
-      
-      // Reset current states
-      setCurrentThreadId(null);
-      setPendingApproval(null);
-      setExplorerData(null);
-      setExplorerOpen(false);
     } catch (error) {
       console.error('Error selecting thread:', error);
       alert('Failed to load chat thread');
@@ -455,18 +571,7 @@ const ChatWithApproval: React.FC = () => {
                 placeholder="Ask me anything..."
                 showApprovalButtons={true}
                 className="h-full"
-                renderBelowLastMessage={
-                  explorerData ? (
-                    <div className="mt-2 flex justify-start w-full">
-                      <button
-                        onClick={() => setExplorerOpen(true)}
-                        className="w-full px-4 py-2 text-sm text-gray-800 border border-gray-300 rounded hover:bg-gray-50 text-left"
-                      >
-                        Open Explorer
-                      </button>
-                    </div>
-                  ) : null
-                }
+                renderBelowLastMessage={null}
               />
             </div>
           </div>

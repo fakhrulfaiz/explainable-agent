@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
-from src.services.chat_history_service import chat_history_service
+from src.services.chat_history_service import ChatHistoryService
+from src.models.database import get_mongodb
 from src.models.chat_models import (
     ChatHistoryResponse,
     ChatListResponse,
@@ -18,11 +19,18 @@ router = APIRouter(
 )
 
 
+def get_chat_history_service(db = Depends(get_mongodb)) -> ChatHistoryService:
+    """Dependency to get ChatHistoryService with database connection"""
+    return ChatHistoryService(db)
+
+
 @router.post("/create", response_model=ChatHistoryResponse)
-async def create_chat_thread(request: CreateChatRequest):
-    """Create a new chat thread"""
+async def create_chat_thread(
+    request: CreateChatRequest,
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+):
     try:
-        thread = await chat_history_service.create_thread(request)
+        thread = await chat_service.create_thread(request)
         return ChatHistoryResponse(
             success=True,
             data=thread,
@@ -36,12 +44,13 @@ async def create_chat_thread(request: CreateChatRequest):
 @router.get("/threads", response_model=ChatListResponse)
 async def get_all_chat_threads(
     limit: int = Query(50, ge=1, le=100, description="Number of threads to return"),
-    skip: int = Query(0, ge=0, description="Number of threads to skip")
+    skip: int = Query(0, ge=0, description="Number of threads to skip"),
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
 ):
-    """Get all chat threads with summary information"""
+  
     try:
-        threads = await chat_history_service.get_all_threads(limit=limit, skip=skip)
-        total = await chat_history_service.get_thread_count()
+        threads = await chat_service.get_all_threads(limit=limit, skip=skip)
+        total = await chat_service.get_thread_count()
         
         return ChatListResponse(
             success=True,
@@ -55,10 +64,12 @@ async def get_all_chat_threads(
 
 
 @router.get("/thread/{thread_id}", response_model=ChatHistoryResponse)
-async def get_chat_thread(thread_id: str):
-    """Get a specific chat thread with full message history"""
+async def get_chat_thread(
+    thread_id: str,
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+):
     try:
-        thread = await chat_history_service.get_thread(thread_id)
+        thread = await chat_service.get_thread(thread_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Chat thread not found")
         
@@ -75,10 +86,13 @@ async def get_chat_thread(thread_id: str):
 
 
 @router.post("/add-message", response_model=dict)
-async def add_message_to_thread(request: AddMessageRequest):
+async def add_message_to_thread(
+    request: AddMessageRequest,
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+):
     """Add a message to an existing chat thread"""
     try:
-        success = await chat_history_service.add_message(request)
+        success = await chat_service.add_message(request)
         if not success:
             raise HTTPException(status_code=404, detail="Chat thread not found")
         
@@ -94,10 +108,14 @@ async def add_message_to_thread(request: AddMessageRequest):
 
 
 @router.put("/thread/{thread_id}/title", response_model=dict)
-async def update_thread_title(thread_id: str, title: str):
+async def update_thread_title(
+    thread_id: str, 
+    title: str,
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+):
     """Update the title of a chat thread"""
     try:
-        success = await chat_history_service.update_thread_title(thread_id, title)
+        success = await chat_service.update_thread_title(thread_id, title)
         if not success:
             raise HTTPException(status_code=404, detail="Chat thread not found")
         
@@ -113,10 +131,13 @@ async def update_thread_title(thread_id: str, title: str):
 
 
 @router.delete("/thread/{thread_id}", response_model=dict)
-async def delete_chat_thread(thread_id: str):
+async def delete_chat_thread(
+    thread_id: str,
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+):
     """Delete a chat thread"""
     try:
-        success = await chat_history_service.delete_thread(thread_id)
+        success = await chat_service.delete_thread(thread_id)
         if not success:
             raise HTTPException(status_code=404, detail="Chat thread not found")
         
@@ -132,13 +153,16 @@ async def delete_chat_thread(thread_id: str):
 
 
 @router.post("/thread/{thread_id}/restore", response_model=ChatHistoryResponse)
-async def restore_chat_thread(thread_id: str):
+async def restore_chat_thread(
+    thread_id: str,
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+):
     """
     Restore a chat thread for continuing conversation.
     This endpoint returns the full chat history that can be used to restore the conversation context.
     """
     try:
-        thread = await chat_history_service.get_thread(thread_id)
+        thread = await chat_service.get_thread(thread_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Chat thread not found")
         

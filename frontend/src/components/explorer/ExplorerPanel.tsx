@@ -8,6 +8,7 @@ export type ExplorerResult = {
   thread_id: string;
   run_status: string;
   assistant_response?: string;
+  query?: string;  // User's original question
   plan?: string;
   error?: string | null;
   steps?: ExplorerStep[];
@@ -94,6 +95,16 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
             <div className="text-gray-500 text-base">No data yet. Send a message and open after the result.</div>
           ) : (
             <div className="space-y-4">
+            {/* User's Original Question */}
+            {data.query && (
+              <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                <div className="text-base text-blue-800 font-medium mb-1">Your Question</div>
+                <div className="text-gray-700 text-base font-medium">
+                  {data.query}
+                </div>
+              </div>
+            )}
+
             {/* Summary */}
             <div className="p-3 bg-green-50 rounded border border-green-200">
               <div className="text-base text-gray-800 font-medium mb-1">Summary</div>

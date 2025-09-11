@@ -12,6 +12,13 @@ export interface Message {
   canRetry?: boolean;
   retryAction?: 'approve' | 'disapprove' | 'cancel';
   threadId?: string;
+  messageType?: 'message' | 'explorer';
+  checkpointId?: string;
+  // New fields for rich content
+  metadata?: {
+    explorerData?: any;
+    [key: string]: any;
+  };
 }
 
 export interface ChatComponentProps {
@@ -79,6 +86,7 @@ export interface GraphResponse {
   thread_id: string;
   run_status: 'user_feedback' | 'finished' | 'error';
   assistant_response?: string;
+  query?: string;  // User's original question
   plan?: string;
   error?: string;
   steps?: StepExplanation[];

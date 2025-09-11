@@ -34,7 +34,7 @@ class PlannerNode:
     
     def _handle_feedback(self, state, messages, user_query):
         human_feedback = state.get('human_comment', '')
-        
+         
         try:
             # Get tool descriptions for the prompt without binding tools
             tool_descriptions = "\n".join([f"- {tool.name}: {tool.description}" for tool in self.tools])
@@ -145,11 +145,12 @@ class PlannerNode:
                             Format your response as a clear, numbered plan with proper line breaks between steps. Each step should be on its own line starting with a number."""
 
         try:
-            # Bind tools to LLM so it knows what's available (but don't let it call them yet)
+      
             llm_with_tools = self.llm.bind_tools(self.tools)
             
             planning_messages = [
                 SystemMessage(content="You are a helpful database query planner. You can see what tools are available but should only create a plan, not execute tools."),
+                SystemMessage(content="CRITICAL: DO NOT EXECUTE ANY TOOLS. You are ONLY allowed to create planning steps and analyze the query. Tool execution is strictly forbidden and will cause errors."),
                 SystemMessage(content=planning_prompt)
             ]
             

@@ -93,6 +93,7 @@ class ResumeRequest(BaseModel):
 
 class GraphResponse(BaseModel):
     thread_id: str
+    checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID")
     run_status: str = Field(..., description="Status: 'user_feedback', 'finished', or 'error'")
     assistant_response: Optional[str] = Field(None, description="Current assistant response or plan")
     plan: Optional[str] = Field(None, description="Current execution plan")

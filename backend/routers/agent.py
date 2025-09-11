@@ -4,6 +4,7 @@ from datetime import datetime
 
 from src.models.schemas import QueryRequest, QueryResponse
 from src.services.explainable_agent import ExplainableAgent
+from src.services.explainable_agent_copy import ParallelExplainableAgent
 from src.services.simple_agent import SimpleAgent
 from src.services.async_simple_agent import AsyncSimpleAgent
 
@@ -20,6 +21,9 @@ def get_simple_agent(request: Request) -> SimpleAgent:
 
 def get_async_simple_agent(request: Request) -> AsyncSimpleAgent:
     return request.app.state.async_simple_agent
+
+def get_parallel_agent(request: Request) -> ParallelExplainableAgent:
+    return request.app.state.parallel_agent
 
 @router.post("/query", response_model=QueryResponse)
 async def process_query(
@@ -81,5 +85,27 @@ async def process_async_query(
         return QueryResponse(
             success=False,
             message=f"Error processing async query: {str(e)}",
+            timestamp=datetime.now()
+        )
+
+@router.post("/parallel-query", response_model=QueryResponse)
+async def process_parallel_query(
+    request: QueryRequest,
+    agent: Annotated[ParallelExplainableAgent, Depends(get_parallel_agent)]
+):
+    """Test endpoint for parallel agent and explainer execution"""
+    try:
+        result = agent.process_query(request.query)
+        
+        return QueryResponse(
+            success=result["success"],
+            data={k: v for k, v in result.items() if k != "success"},
+            message="Parallel query processed successfully" if result["success"] else f"Error: {result.get('error', 'Unknown error')}",
+            timestamp=datetime.now()
+        )
+    except Exception as e:
+        return QueryResponse(
+            success=False,
+            message=f"Error processing parallel query: {str(e)}",
             timestamp=datetime.now()
         )
