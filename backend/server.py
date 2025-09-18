@@ -17,7 +17,7 @@ from src.services.explainable_agent_copy import ParallelExplainableAgent
 from src.services.simple_agent import SimpleAgent
 from src.services.async_simple_agent import AsyncSimpleAgent
 
-from routers import agent, graph, test_stream, chat_history, explorer
+from routers import agent, graph, test_stream, chat_history, explorer, llm, users
 from src.models.database import mongodb_manager, get_mongodb
 from routers.chat_history import get_chat_history_service
 
@@ -70,25 +70,11 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("⚠️  LangSmith tracing disabled (set LANGSMITH_TRACING=true and LANGSMITH_API_KEY to enable)")
     
-    # Create LLM instance
-    if settings.llm_provider.lower() == "ollama":
-        llm = ChatOllama(
-            base_url=settings.ollama_base_url,
-            model=settings.ollama_model,
-        )
-        logger.info(f"✅ Using Ollama model: {settings.ollama_model} at {settings.ollama_base_url}")
-    else:
-        llm = ChatOpenAI(
-            api_key=settings.openai_api_key,
-            model=settings.openai_model,
-        )
-        logger.info(f"LLM Provider: {settings.llm_provider}")
-        logger.info(f"✅ Using OpenAI model: {settings.openai_model}")
-
-    deepseek_llm = ChatDeepSeek(
-        api_key=settings.deepseek_api_key,
-        model=settings.deepseek_model,
-    )
+    # Initialize LLM using service for dynamic switching
+    from src.services.llm_service import get_llm_service
+    llm_service = get_llm_service()
+    llm = llm_service.get_current_llm()
+    logger.info(f"✅ Using LLM: {llm_service.get_current_config()}")
 
     # Create agent instances
     explainable_agent = ExplainableAgent(
@@ -98,31 +84,10 @@ async def lifespan(app: FastAPI):
         mongo_memory=mongodb_manager.get_mongo_memory()
     )
     
-    simple_agent = SimpleAgent(
-        llm=llm,
-        db_path=settings.database_path,
-        logs_dir=settings.logs_dir
-    )
-    
-    async_simple_agent = AsyncSimpleAgent(
-        llm=llm,
-        db_path=settings.database_path,
-        logs_dir=settings.logs_dir
-    )
-    
-    parallel_agent = ParallelExplainableAgent(
-        llm=llm,
-        db_path=settings.database_path,
-        logs_dir=settings.logs_dir,
-        mongo_memory=mongodb_manager.get_mongo_memory()
-    )
-    
     app.state.llm = llm
+    app.state.llm_service = llm_service
     app.state.explainable_agent = explainable_agent
-    app.state.simple_agent = simple_agent
-    app.state.async_simple_agent = async_simple_agent
-    app.state.parallel_agent = parallel_agent
-    
+  
     logger.info("All services initialized successfully!")
     
     yield
@@ -157,6 +122,11 @@ app.include_router(graph.router)
 app.include_router(test_stream.router)
 app.include_router(chat_history.router)
 app.include_router(explorer.router)
+
+# Include LLM router  
+from routers import llm
+app.include_router(llm.router)
+app.include_router(users.router)
 
 @app.get("/")
 async def root():

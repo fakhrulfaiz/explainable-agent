@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from uuid import uuid4
 from datetime import datetime
 from typing import Annotated
+import logging
 
 from src.models.schemas import StartRequest, GraphResponse, GraphStatusResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
@@ -21,6 +22,14 @@ def get_explainable_agent(request: Request) -> ExplainableAgent:
 
 
 def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, config):
+    logger = logging.getLogger(__name__)
+    thread_id = config.get("configurable", {}).get("thread_id", "unknown")
+    
+    # Initialize query variable with default value to avoid scoping issues
+    query = ""
+    
+    operation = "resume" if input_state is None else "start"
+    logger.info(f"Graph execution ({operation}) for thread_id: {thread_id}, input_state: {'None' if input_state is None else 'provided'}")
     
     try:
         # Use streaming instead of invoke
@@ -122,13 +131,14 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             )
             
     except Exception as e:
-        thread_id = config["configurable"]["thread_id"]
+        error_message = str(e) if e else "Unknown error occurred"
+        logger.error(f"Graph execution failed for thread_id: {thread_id}, error: {error_message}")
         return GraphResponse(
             thread_id=thread_id,
             checkpoint_id=None,  # No checkpoint_id available on error
             query=query,
             run_status="error",
-            error=str(e)
+            error=error_message
         )
 
 
@@ -165,7 +175,10 @@ def resume_graph(
     request: ResumeRequest,
     agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
 ):
+    logger = logging.getLogger(__name__)
     config = {"configurable": {"thread_id": request.thread_id}}
+    
+    logger.info(f"Resuming graph for thread_id: {request.thread_id}, action: {request.review_action}")
     
     try:
         # Get current state
@@ -173,12 +186,16 @@ def resume_graph(
         if not current_state:
             raise HTTPException(status_code=404, detail=f"No graph execution found for thread_id: {request.thread_id}")
         
-     
+        # Check if the graph is already running (not waiting for feedback)
+        if not (current_state.next and "human_feedback" in current_state.next):
+            logger.warning(f"Thread {request.thread_id} is not waiting for human feedback. Current next nodes: {current_state.next}")
+            raise HTTPException(status_code=400, detail=f"Graph execution for thread_id {request.thread_id} is not waiting for human feedback")
+        
         state_update = {"status": request.review_action}
         if request.human_comment is not None:
             state_update["human_comment"] = request.human_comment
         
-        print(f"State to update: {state_update}")
+        logger.info(f"State to update for thread {request.thread_id}: {state_update}")
         
         agent.graph.update_state(config, state_update)
         
@@ -186,9 +203,10 @@ def resume_graph(
         return run_graph_and_response(agent, None, config)
         
     except Exception as e:
-        if "thread_id" in str(e).lower() or "not found" in str(e).lower():
+        error_message = str(e) if e else "Unknown error occurred"
+        if "thread_id" in error_message.lower() or "not found" in error_message.lower():
             raise HTTPException(status_code=404, detail=f"Graph execution not found for thread_id: {request.thread_id}")
-        raise HTTPException(status_code=500, detail=f"Error resuming graph: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error resuming graph: {error_message}")
 
 
 @router.get("/status/{thread_id}", response_model=GraphStatusResponse)

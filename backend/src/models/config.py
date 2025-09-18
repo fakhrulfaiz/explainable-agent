@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     cors_headers: List[str] = ["*"]
     
     # LLM Provider Selection
-    llm_provider: str = "openai"  # options: openai, ollama
+    llm_provider: str = "openai"  # options: openai, ollama, deepseek, groq
 
     # OpenAI Configuration
     openai_api_key: str = ""
@@ -33,8 +33,13 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1:8b"
 
+    # DeepSeek Configuration
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
+    
+    # Groq Configuration
+    groq_api_key: str = ""
+    groq_model: str = "llama3-8b-8192"
     
     # LangSmith Configuration
     langsmith_tracing: bool = False

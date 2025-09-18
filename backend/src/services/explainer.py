@@ -105,7 +105,7 @@ All Steps Summary:
 } for i, step in enumerate(all_steps)], indent=2)}
 
 Provide a structured final explanation with:
-- summary: Overall summary of what the agent accomplished
+- summary: Overall summary of what the agent accomplished, if the result has image link, use format ![Alt text](image_link)
 - details: Detailed explanation of the final result
 - source: Where the information came from
 - inference: What can be inferred from the results

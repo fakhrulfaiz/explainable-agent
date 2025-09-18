@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 from src.services.chat_history_service import ChatHistoryService
-from src.models.database import get_mongodb
+from src.repositories.dependencies import get_chat_history_service
 from src.models.chat_models import (
     ChatHistoryResponse,
     ChatListResponse,
@@ -17,11 +17,6 @@ router = APIRouter(
     prefix="/chat-history",
     tags=["chat-history"]
 )
-
-
-def get_chat_history_service(db = Depends(get_mongodb)) -> ChatHistoryService:
-    """Dependency to get ChatHistoryService with database connection"""
-    return ChatHistoryService(db)
 
 
 @router.post("/create", response_model=ChatHistoryResponse)

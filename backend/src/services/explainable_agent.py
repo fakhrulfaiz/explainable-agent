@@ -43,7 +43,6 @@ class ExplainableAgent:
         self.tools = self.toolkit.get_tools()
         self.explainer = Explainer(llm)
         self.planner = PlannerNode(llm, self.tools)
-        
         self.logs_dir = logs_dir or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
         os.makedirs(self.logs_dir, exist_ok=True)
         self.mongo_memory = mongo_memory
@@ -126,8 +125,7 @@ class ExplainableAgent:
         system_message = prompt_template.format(dialect="SQLite", top_k=5)
         system_message += f"""
 
-You are a helpful SQL database assistant. Use the available SQL tools to answer questions about the database.
-
+You are a helpful SQL database assistant. Use the available SQL tools to answer questions about the database. Make to follow the plan strictly if exists.
 When you need to answer questions about the database, always use the appropriate tools to query the database first.
 For example, to count tables, use sql_db_list_tables first to see what tables exist.
 Always provide explanations for your queries and results."""
@@ -135,8 +133,12 @@ Always provide explanations for your queries and results."""
         # Bind tools to LLM so it can call them
         llm_with_tools = self.llm.bind_tools(self.tools)
         
+        # Filter out previous system messages to avoid conflicts
+        conversation_messages = [msg for msg in messages 
+                               if not isinstance(msg, SystemMessage)]
+        
         # Prepare messages for LLM
-        all_messages = [SystemMessage(content=system_message)] + messages
+        all_messages = [SystemMessage(content=system_message)] + conversation_messages
         
         response = llm_with_tools.invoke(all_messages)
         

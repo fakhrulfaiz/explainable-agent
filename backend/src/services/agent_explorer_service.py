@@ -63,24 +63,21 @@ class AgentExplorerService:
                 confidences = [step["confidence"] for step in steps if step["confidence"] > 0]
                 overall_confidence = sum(confidences) / len(confidences) if confidences else 0.8
             
-            # Get assistant response from messages (same logic as graph router)
-            assistant_response = values.get("assistant_response", "")
-            
-            # If no direct assistant_response, extract from messages like in graph router
-            if not assistant_response:
+            last_message = None
+            if values.get("messages", []):
                 messages = values.get("messages", [])
                 for msg in reversed(messages):
                     if (hasattr(msg, 'content') and msg.content and 
                         type(msg).__name__ == 'AIMessage' and
                         (not hasattr(msg, 'tool_calls') or not msg.tool_calls)):
-                        assistant_response = msg.content
+                        last_message = msg.content
                         break
             
             # Create final result if we have steps
             final_result = None
             if steps:
                 final_result = {
-                    "summary": assistant_response[:200] + "..." if len(assistant_response) > 200 else assistant_response,
+                    "summary": last_message,
                     "details": f"Executed {len(steps)} steps successfully",
                     "source": "Database query execution",
                     "inference": "Based on database analysis and tool execution",
@@ -92,7 +89,7 @@ class AgentExplorerService:
                 "thread_id": thread_id,
                 "checkpoint_id": checkpoint_id,
                 "run_status": "finished",
-                "assistant_response": assistant_response,
+                "assistant_response": last_message,
                 "query": values.get("query", ""),  # Include the user's original question
                 "plan": values.get("plan", ""),
                 "error": None,
