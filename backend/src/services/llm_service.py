@@ -13,16 +13,14 @@ import gc
 logger = logging.getLogger(__name__)
 
 class LLMService:
-    """Service for creating and managing LLM instances dynamically"""
+ 
     
     def __init__(self):
         self._current_llm = None
         self._current_config = None
     
     def get_current_llm(self):
-        """Get the currently active LLM instance"""
         if self._current_llm is None:
-            # Initialize with default settings
             self._current_llm = self.create_llm(
                 provider=settings.llm_provider,
                 model=getattr(settings, f"{settings.llm_provider}_model", None)
