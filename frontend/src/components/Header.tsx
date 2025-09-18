@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { MessageCircle, Users, Code, Bot, Menu, X } from 'lucide-react';
+import LLMSelector from './LLMSelector';
 
 // Custom hook for window size
 const useWindowSize = () => {
@@ -97,11 +98,12 @@ const Header: React.FC = () => {
           </div>
         ) : (
           /* Desktop: Normal Navigation */
-          <nav style={{
-            display: 'flex',
-            gap: '0.5rem'
-          }}>
-            {navItems.map(({ path, label, icon: Icon }) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <nav style={{
+              display: 'flex',
+              gap: '0.5rem'
+            }}>
+              {navItems.map(({ path, label, icon: Icon }) => (
               <Link
                 key={path}
                 to={path}
@@ -135,8 +137,10 @@ const Header: React.FC = () => {
                 <Icon size={16} />
                 {label}
               </Link>
-            ))}
-          </nav>
+              ))}
+            </nav>
+            <LLMSelector />
+          </div>
         )}
       </div>
       

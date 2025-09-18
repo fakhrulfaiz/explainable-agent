@@ -525,7 +525,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   };
 
   return (
-    <div className={`flex flex-col h-full bg-white border border-gray-200 rounded-lg ${className}`}>
+    <div className={`flex flex-col h-full min-h-0 overflow-hidden bg-white border border-gray-200 rounded-lg ${className}`}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50 rounded-t-lg">
         <h3 className="font-semibold text-gray-900">Chat</h3>
@@ -540,9 +540,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
 
       {/* Messages */}
       <div 
-        className="flex-1 p-4 space-y-4 min-h-0 slim-scroll"
+        className="flex-1 p-4 space-y-4 min-h-0 slim-scroll overflow-y-auto"
         style={{
-          overflowY: 'overlay' as any,
           scrollbarWidth: 'thin',
           scrollbarColor: '#d1d5db transparent'
         }}
@@ -594,6 +593,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
               onClick={() => setShowFeedbackForm(true)}
               className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
+              Send Feedback
             </button>
             <button
               onClick={() => handleApprove(pendingApproval)}

@@ -561,8 +561,8 @@ const ChatWithApproval: React.FC = () => {
   };
 
   return (
-    <div style={{ height: '100%', padding: '0 0.5rem', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100%', padding: '0 0.5rem', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       
         {/* Thread Selector */}
         <div className="mb-4">
@@ -575,13 +575,12 @@ const ChatWithApproval: React.FC = () => {
         </div>
 
         {/* Chat Container */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <div className="p-4 border-b border-gray-200">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-semibold text-gray-900">Explainable Agent</h2>
-              
                 </div>
                 {selectedChatThreadId && (
                   <div className="text-xs text-gray-500">
@@ -590,7 +589,7 @@ const ChatWithApproval: React.FC = () => {
                 )}
               </div>
             </div>
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0" style={{ overflow: 'hidden' }}>
               <ChatComponent
                 key={`chat-approval-${chatKey}`}
                 onSendMessage={handleSendMessage}
