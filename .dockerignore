@@ -42,9 +42,22 @@ docker-compose*.yml
 .dockerignore
 
 # Testing
+tests/
+backend/tests/
+frontend/tests/
+test_*.py
+*_test.py
+*.test.js
+*.test.ts
+*.test.tsx
 .coverage
 coverage/
+htmlcov/
 .pytest_cache/
+pytest.ini
+requirements-test.txt
+run_tests.py
+TEST_EXAMPLES.md
 
 # Other
 *.tmp
