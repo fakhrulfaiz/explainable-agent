@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Send, ThumbsUp, ThumbsDown, RotateCcw } from 'lucide-react';
 import { Message as MessageType, ChatComponentProps, HandlerResponse } from '../types/chat';
 import Message from './Message';
@@ -41,10 +41,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   }, [messages]);
 
 
+  // Memoize initialMessages to prevent unnecessary re-renders
+  const memoizedInitialMessages = useMemo(() => initialMessages, [
+    initialMessages.length,
+    initialMessages.map(m => m.id).join(','),
+    initialMessages.map(m => m.content).join(',')
+  ]);
+
   // Update messages when initialMessages prop changes
   useEffect(() => {
-    setMessages(initialMessages);
-  }, [initialMessages]);
+    setMessages(memoizedInitialMessages);
+  }, [memoizedInitialMessages]);
 
   // Helper function to handle response and create explorer message if needed
   const handleResponse = useCallback((response: string | HandlerResponse): string => {

@@ -1,7 +1,9 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Header } from './components';
-import { ChatWithApproval, SimpleChat, Demo, StreamingTutorial } from './pages';
+import { ChatWithApproval, SimpleChat, Demo, StreamingTutorial, Login, SignUp, ForgotPassword, UpdatePassword, AuthConfirm } from './pages';
+import { AuthProvider } from './contexts/AuthContext';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import './App.css';
 
 const AppContent: React.FC = () => {
@@ -10,10 +12,25 @@ const AppContent: React.FC = () => {
       <Header />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: '6rem', minHeight: 0, overflow: 'hidden' }}>
         <Routes>
-          <Route path="/" element={<ChatWithApproval />} />
-          <Route path="/simple" element={<SimpleChat />} />
-          <Route path="/demo" element={<Demo />} />
-          <Route path="/streaming" element={<StreamingTutorial />} />
+          {/* 🟢 Public routes - anyone can access */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/sign-up" element={<SignUp />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/update-password" element={<UpdatePassword />} />
+          <Route path="/auth/confirm" element={<AuthConfirm />} />
+          
+          {/* 🔒 Protected routes - only logged in users can access */}
+          <Route path="/" element={
+            <ProtectedRoute>
+              <ChatWithApproval />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/streaming" element={
+            <ProtectedRoute>
+              <StreamingTutorial />
+            </ProtectedRoute>
+          } />
         </Routes>
       </div>
     </div>
@@ -23,7 +40,9 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   return (
     <Router>
-      <AppContent />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </Router>
   );
 };

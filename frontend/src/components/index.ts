@@ -8,3 +8,5 @@ export { default as Header } from './Header';
 export { default as ExplorerPanel } from './explorer/ExplorerPanel.tsx';
 export { default as StepDetails } from './StepDetails';
 export type { ExplorerStep } from './StepDetails';
+export { ProtectedRoute } from './ProtectedRoute';
+export { UserMenu } from './UserMenu';

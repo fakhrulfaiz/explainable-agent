@@ -4,10 +4,8 @@ from pymongo.database import Database
 from src.models.database import get_mongodb
 from .chat_thread_repository import ChatThreadRepository
 from .checkpoint_repository import CheckpointWriteRepository, CheckpointRepository
-from .user_repository import UserRepository
 from src.services.chat_history_service import ChatHistoryService
 from src.services.checkpoint_service import CheckpointService
-from src.services.user_service import UserService
 
 # Repository Dependencies
 def get_chat_thread_repository(db: Database = Depends(get_mongodb)) -> ChatThreadRepository:
@@ -22,9 +20,6 @@ def get_checkpoint_repository(db: Database = Depends(get_mongodb)) -> Checkpoint
     """Dependency to get CheckpointRepository"""
     return CheckpointRepository(db)
 
-def get_user_repository(db: Database = Depends(get_mongodb)) -> UserRepository:
-    """Dependency to get UserRepository"""
-    return UserRepository(db)
 
 # Service Dependencies (using repositories)
 def get_checkpoint_service(
@@ -40,8 +35,3 @@ def get_chat_history_service(
 
     return ChatHistoryService(chat_thread_repo, checkpoint_service)
 
-def get_user_service(
-    user_repo: UserRepository = Depends(get_user_repository)
-):
-    """Dependency to get UserService with repository injection"""
-    return UserService(user_repo)

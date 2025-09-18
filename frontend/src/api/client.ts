@@ -22,11 +22,17 @@ class ApiClient {
   private setupInterceptors() {
     // Request interceptor
     this.client.interceptors.request.use(
-      (config) => {
-        // Add auth token if available
-        const token = localStorage.getItem('auth_token');
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+      async (config) => {
+        // Add Supabase auth token if available
+        try {
+          const { supabaseClient } = await import('./supabase');
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          
+          if (session?.access_token) {
+            config.headers.Authorization = `Bearer ${session.access_token}`;
+          }
+        } catch (error) {
+          console.warn('Failed to get auth token:', error);
         }
         
         // Add request timestamp
@@ -45,14 +51,19 @@ class ApiClient {
         console.log(`API Response: ${response.status} ${response.config.url}`);
         return response;
       },
-      (error) => {
+      async (error) => {
         console.error('Response Error:', error.response?.data || error.message);
         
         // Handle common error cases
         if (error.response?.status === 401) {
-          // Unauthorized - clear auth token
-          localStorage.removeItem('auth_token');
-          // Optionally redirect to login
+          // Unauthorized - sign out and redirect
+          try {
+            const { supabaseClient } = await import('./supabase');
+            await supabaseClient.auth.signOut();
+            window.location.href = '/login';
+          } catch {
+            window.location.href = '/login';
+          }
         }
         
         return Promise.reject(error);

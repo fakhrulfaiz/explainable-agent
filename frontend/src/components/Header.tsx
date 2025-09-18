@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageCircle, Users, Code, Bot, Menu, X } from 'lucide-react';
+import { MessageCircle, Code, Bot, Menu, X } from 'lucide-react';
 import LLMSelector from './LLMSelector';
+import { UserMenu } from './UserMenu';
 
 // Custom hook for window size
 const useWindowSize = () => {
@@ -31,8 +32,6 @@ const Header: React.FC = () => {
 
   const navItems = [
     { path: '/', label: 'Chat with Approval', icon: MessageCircle },
-    { path: '/simple', label: 'Simple Chat', icon: Users },
-    { path: '/demo', label: 'Demo', icon: Code },
     { path: '/streaming', label: 'Streaming Tutorial', icon: Code },
   ];
 
@@ -139,7 +138,10 @@ const Header: React.FC = () => {
               </Link>
               ))}
             </nav>
-            <LLMSelector />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <LLMSelector />
+              <UserMenu />
+            </div>
           </div>
         )}
       </div>

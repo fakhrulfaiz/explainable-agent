@@ -11,3 +11,6 @@ export * from './agentService';
 export * from './approvalService';
 export * from './chatHistoryService';
 export * from './explorerService';
+
+// Re-export auth service from parent directory
+export { authService } from '../authService';
