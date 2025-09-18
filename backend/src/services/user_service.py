@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class UserService:
-    """Service for managing users using repository pattern"""
     
     def __init__(self, user_repo: UserRepository):
         self.user_repo = user_repo

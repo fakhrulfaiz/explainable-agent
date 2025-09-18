@@ -21,7 +21,6 @@ class UserStatus(str, Enum):
 
 
 class User(BaseModel):
-    """User entity model"""
     user_id: str = Field(..., description="Unique user identifier")
     email: str = Field(..., description="User email address")
     username: str = Field(..., min_length=3, max_length=50, description="Username")
@@ -35,14 +34,12 @@ class User(BaseModel):
     
     @validator('email')
     def validate_email(cls, v):
-        """Simple email validation"""
         if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
             raise ValueError('Invalid email format')
         return v.lower()
     
     @validator('username')
     def validate_username(cls, v):
-        """Username validation"""
         if not re.match(r'^[a-zA-Z0-9_-]+$', v):
             raise ValueError('Username can only contain letters, numbers, underscores, and hyphens')
         return v.lower()
@@ -54,7 +51,6 @@ class User(BaseModel):
 
 
 class UserSummary(BaseModel):
-    """User summary for listing purposes"""
     user_id: str
     email: str
     username: str
@@ -75,21 +71,18 @@ class CreateUserRequest(BaseModel):
     
     @validator('email')
     def validate_email(cls, v):
-        """Simple email validation"""
         if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
             raise ValueError('Invalid email format')
         return v.lower()
     
     @validator('username')
     def validate_username(cls, v):
-        """Username validation"""
         if not re.match(r'^[a-zA-Z0-9_-]+$', v):
             raise ValueError('Username can only contain letters, numbers, underscores, and hyphens')
         return v.lower()
 
 
 class UpdateUserRequest(BaseModel):
-    """Request model for user updates"""
     full_name: Optional[str] = Field(None, description="User's full name")
     role: Optional[UserRole] = Field(None, description="User role")
     status: Optional[UserStatus] = Field(None, description="User status")
@@ -97,14 +90,12 @@ class UpdateUserRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
-    """Response model for user operations"""
     success: bool
     data: Optional[User] = None
     message: str
 
 
 class UserListResponse(BaseModel):
-    """Response model for user list operations"""
     success: bool
     data: List[UserSummary]
     message: str
