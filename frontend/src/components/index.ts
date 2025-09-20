@@ -10,3 +10,4 @@ export { default as StepDetails } from './StepDetails';
 export type { ExplorerStep } from './StepDetails';
 export { ProtectedRoute } from './ProtectedRoute';
 export { UserMenu } from './UserMenu';
+export { default as StreamingGraphComponent } from './StreamingGraphComponent';

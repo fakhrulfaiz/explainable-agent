@@ -10,7 +10,7 @@ const AppContent: React.FC = () => {
   return (
     <div style={{ height: '100vh', backgroundColor: '#f9fafb', display: 'flex', flexDirection: 'column' }}>
       <Header />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: '6rem', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: '6rem', minHeight: 0, overflow: 'auto' }}>
         <Routes>
           {/* 🟢 Public routes - anyone can access */}
           <Route path="/login" element={<Login />} />
