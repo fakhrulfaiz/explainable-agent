@@ -17,7 +17,7 @@ from src.services.explainable_agent_copy import ParallelExplainableAgent
 from src.services.simple_agent import SimpleAgent
 from src.services.async_simple_agent import AsyncSimpleAgent
 
-from routers import graph, test_stream, chat_history, explorer, llm
+from routers import graph, test_stream, chat_history, explorer, llm, streaming_graph
 from src.models.database import mongodb_manager, get_mongodb
 from routers.chat_history import get_chat_history_service
 from src.middleware.auth import get_current_user, get_optional_user
@@ -120,6 +120,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(graph.router)
+app.include_router(streaming_graph.router)
 app.include_router(test_stream.router)
 app.include_router(chat_history.router)
 app.include_router(explorer.router)
@@ -132,25 +133,14 @@ app.include_router(llm.router)
 @app.get("/api/auth/me")
 async def get_current_user_info(current_user: SupabaseUser = Depends(get_current_user)):
     """Get current authenticated user information"""
-    return {
-        "user_id": current_user.user_id,
-        "email": current_user.email,
-        "role": current_user.role,
-        "email_verified": current_user.email_verified,
-        "provider": current_user.provider,
-        "last_sign_in": current_user.last_sign_in
-    }
+    return current_user.model_dump()
 
 @app.get("/api/auth/status")
 async def get_auth_status(request: Request, user: SupabaseUser = Depends(get_optional_user)):
     """Check authentication status (optional)"""
     return {
         "authenticated": user is not None,
-        "user": {
-            "user_id": user.user_id,
-            "email": user.email,
-            "role": user.role
-        } if user else None
+        "user": user.model_dump() if user else None
     }
 
 @app.get("/")

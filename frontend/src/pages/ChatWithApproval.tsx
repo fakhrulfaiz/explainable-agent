@@ -29,13 +29,13 @@ const ChatWithApproval: React.FC = () => {
       timestamp: new Date(msg.timestamp),
       needsApproval: false, // Historical messages don't need approval
       threadId: selectedChatThreadId || undefined,
-      messageType: msg.message_type as 'message' | 'explorer' || 'message',
+      messageType: (msg.message_type as 'message' | 'explorer') || 'message',
       checkpointId: msg.checkpoint_id
     }));
   };
 
   const restoreExplorerDataIfNeeded = async (messages: Message[], threadId: string) => {
-    // Find the last explorer message (most recent one)
+    // Find ALL explorer messages that need data restoration
     const explorerMessages = messages.filter(msg => 
       msg.messageType === 'explorer' && 
       msg.checkpointId && 
@@ -43,37 +43,58 @@ const ChatWithApproval: React.FC = () => {
     );
 
     if (explorerMessages.length > 0) {
-      // Get the most recent explorer message
-      const lastExplorerMessage = explorerMessages[explorerMessages.length - 1];
-      
       try {
-        console.log('Restoring explorer data for checkpoint:', lastExplorerMessage.checkpointId);
-        console.log('Using thread_id:', threadId);
+        // Collect all explorer data first
+        const explorerDataMap = new Map();
         
-        // Fetch explorer data using the checkpoint_id and provided thread_id
-        const explorerData = await ExplorerService.getExplorerData(
-          threadId,
-          lastExplorerMessage.checkpointId!
-        );
-        
-        if (explorerData) {
-          setExplorerData(explorerData);
-          
-          // Update the restored messages to include explorer data in metadata
-          setRestoredMessages(prevMessages => 
-            prevMessages.map(msg => 
-              msg.id === lastExplorerMessage.id 
-                ? { ...msg, metadata: { explorerData } }
-                : msg
-            )
-          );
-          
-          console.log('Explorer data restored successfully');
+        for (const explorerMessage of explorerMessages) {
+          try {
+            // Fetch explorer data using the checkpoint_id and provided thread_id
+            const explorerData = await ExplorerService.getExplorerData(
+              threadId,
+              explorerMessage.checkpointId!
+            );
+            
+            if (explorerData) {
+              explorerDataMap.set(explorerMessage.id, explorerData);
+            }
+          } catch (error) {
+            console.error('Failed to restore explorer data for checkpoint:', explorerMessage.checkpointId, error);
+            // Continue with other messages even if one fails
+          }
         }
+        
+        // Create a completely new messages array with updated explorer data
+        const updatedMessages = messages.map(msg => {
+          if (msg.messageType === 'explorer' && explorerDataMap.has(msg.id)) {
+            const explorerData = explorerDataMap.get(msg.id);
+            return {
+              ...msg,
+              metadata: { explorerData }
+            };
+          }
+          return msg;
+        });
+        
+        // Update all messages at once with completely new array
+        setRestoredMessages(updatedMessages);
+        
+        // Set the most recent explorer data for the panel
+        const lastExplorerMessage = explorerMessages[explorerMessages.length - 1];
+        if (lastExplorerMessage) {
+          const lastUpdatedMessage = updatedMessages.find(msg => msg.id === lastExplorerMessage.id);
+          if (lastUpdatedMessage?.metadata?.explorerData) {
+            setExplorerData(lastUpdatedMessage.metadata.explorerData);
+          }
+        }
+        
       } catch (error) {
         console.error('Failed to restore explorer data:', error);
         // Don't show error to user, just log it
       }
+    } else {
+      // No explorer messages, just set the messages as-is
+      setRestoredMessages(messages);
     }
   };
 
@@ -515,10 +536,8 @@ const ChatWithApproval: React.FC = () => {
       if (threadId) {
         // Load the selected thread and restore messages
         const thread = await ChatHistoryService.restoreThread(threadId);
-        console.log('Restored thread:', thread);
        
         const convertedMessages = convertChatHistoryToMessages(thread.messages || []);
-        setRestoredMessages(convertedMessages);
         
         // Reset current states first
         setCurrentThreadId(null);
@@ -526,10 +545,13 @@ const ChatWithApproval: React.FC = () => {
         setExplorerData(null);
         setExplorerOpen(false);
         
-        setChatKey(prev => prev + 1);
-        
-        // After messages are restored, check if we need to restore explorer data
+        // Restore explorer data BEFORE setting messages and triggering re-render
         await restoreExplorerDataIfNeeded(convertedMessages, threadId);
+        
+        // The restoreExplorerDataIfNeeded function now handles setRestoredMessages internally
+        // so we don't need to call it here anymore
+        
+        setChatKey(prev => prev + 1);
       } else {
         // Clear selection and messages
         setRestoredMessages([]);

@@ -1,12 +1,5 @@
 import { apiClient } from '../client';
-
-export interface ChatMessage {
-  sender: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-  message_type?: 'message' | 'explorer';
-  checkpoint_id?: string;
-}
+import { ChatMessage } from '../types';
 
 export interface ChatThread {
   thread_id: string;

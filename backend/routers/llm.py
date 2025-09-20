@@ -79,8 +79,11 @@ async def switch_llm(
         
         # Recreate agents with new LLM
         try:
-            # Get MongoDB memory from existing app state if available
-            mongo_memory = getattr(app_request.app.state, 'mongo_memory', None)
+            # Import mongodb_manager to get the proper mongo_memory instance
+            from src.models.database import mongodb_manager
+            
+            # Get MongoDB memory from the manager (same as server startup)
+            mongo_memory = mongodb_manager.get_mongo_memory()
             
             # Create new agent instances
             explainable_agent = ExplainableAgent(
