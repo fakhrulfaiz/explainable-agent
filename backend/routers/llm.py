@@ -6,9 +6,6 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional, Annotated
 from src.services.llm_service import LLMService, get_llm_service
 from src.services.explainable_agent import ExplainableAgent
-from src.services.simple_agent import SimpleAgent
-from src.services.async_simple_agent import AsyncSimpleAgent
-from src.services.explainable_agent_copy import ParallelExplainableAgent
 from src.models.config import settings
 import logging
 

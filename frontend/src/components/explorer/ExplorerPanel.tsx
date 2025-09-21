@@ -4,6 +4,7 @@ import StepDetails, { ExplorerStep } from '../StepDetails';
 import '../../styles/scrollbar.css';
 import { getStatusDisplayName, getStatusColor } from '../../utils/statusHelpers';
 import { markdownComponents } from '../../utils/markdownComponents';
+import remarkGfm from 'remark-gfm';
 
 
 
@@ -135,27 +136,33 @@ const ExplorerPanel: React.FC<ExplorerPanelProps> = ({ open, onClose, data, init
             )}
 
             {/* Summary */}
-            <div className="p-3 bg-green-50 rounded border border-green-200">
-              <div className="text-base text-gray-800 font-medium mb-1">Summary</div>
-              <div className="text-gray-700 text-base">
+            <details className="border border-green-200 rounded bg-green-50">
+              <summary className="list-none cursor-pointer select-none p-3 flex items-center justify-between hover:bg-green-100">
+                <div className="text-base text-gray-800 font-medium">Summary</div>
+                <span className="text-sm text-gray-500">Click to expand</span>
+              </summary>
+              <div className="p-3 border-t border-green-200 text-gray-700 text-base">
                 {data.final_result?.summary || data.assistant_response ? (
-                  <ReactMarkdown components={markdownComponents}>
+                  <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
                     {data.final_result?.summary || data.assistant_response || ''}
                   </ReactMarkdown>
                 ) : '—'}
               </div>
-            </div>
+            </details>
 
             {/* Plan */}
             {data.plan && (
-              <div className="p-3 bg-blue-50 rounded border border-blue-200">
-                <div className="text-base text-gray-800 font-medium mb-1">Plan</div>
-                <div className="text-sm text-gray-700">
+              <details className="border border-blue-200 rounded bg-blue-50">
+                <summary className="list-none cursor-pointer select-none p-3 flex items-center justify-between hover:bg-blue-100">
+                  <div className="text-base text-gray-800 font-medium">Plan</div>
+                  <span className="text-sm text-gray-500">Click to expand</span>
+                </summary>
+                <div className="p-3 border-t border-blue-200 text-sm text-gray-700">
                   <ReactMarkdown components={markdownComponents}>
                     {data.plan}
                   </ReactMarkdown>
                 </div>
-              </div>
+              </details>
             )}
 
             {/* Details */}

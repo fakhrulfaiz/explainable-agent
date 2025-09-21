@@ -587,30 +587,22 @@ const ChatWithApproval: React.FC = () => {
       <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       
         {/* Thread Selector */}
-        <div className="mb-4">
-          <ChatThreadSelector
-            selectedThreadId={selectedChatThreadId || undefined}
-            onThreadSelect={handleThreadSelect}
-            onNewThread={handleNewThread}
-            className="max-w-md"
-          />
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex-1">
+            <ChatThreadSelector
+              selectedThreadId={selectedChatThreadId || undefined}
+              onThreadSelect={handleThreadSelect}
+              onNewThread={handleNewThread}
+            />
+          </div>
+          <div className="text-xs text-gray-500 ml-4 flex-shrink-0 w-86 text-right">
+            {selectedChatThreadId ? `Thread ID: ${selectedChatThreadId}` : ''}
+          </div>
         </div>
 
         {/* Chat Container */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <div className="p-4 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-semibold text-gray-900">Explainable Agent</h2>
-                </div>
-                {selectedChatThreadId && (
-                  <div className="text-xs text-gray-500">
-                    Chat ID: {selectedChatThreadId}
-                  </div>
-                )}
-              </div>
-            </div>
             <div className="flex-1 min-h-0" style={{ overflow: 'hidden' }}>
               <ChatComponent
                 key={`chat-approval-${chatKey}`}

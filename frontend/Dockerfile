@@ -2,10 +2,13 @@ FROM node:alpine
 
 WORKDIR /app
 
+# Copy package files first for better layer caching
 COPY package*.json ./
 
-RUN npm install
+# Install dependencies
+RUN npm ci --only=production=false
 
+# Copy source code
 COPY . .
 
 EXPOSE 5173

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_validator
 from pydantic_settings import BaseSettings
 from typing import List, Optional, Dict, Any
 from .status_enums import ExecutionStatusType, ApprovalStatusType, validate_execution_status, validate_approval_status
@@ -85,6 +85,8 @@ class FinalResult(BaseModel):
 class StartRequest(BaseModel):
     human_request: str = Field(..., min_length=1, max_length=1000, description="User request to process")
     thread_id: Optional[str] = Field(None, description="Optional thread ID for existing conversations")
+    use_planning: bool = Field(True, description="Whether to use planning in agent execution")
+    agent_type: str = Field("assistant", description="Type of agent to use: 'assistant' (routes to appropriate agent) or 'explainable' (direct to explainable agent)")
 
 
 class ResumeRequest(BaseModel):
@@ -92,7 +94,7 @@ class ResumeRequest(BaseModel):
     review_action: ApprovalStatusType = Field(..., description="Human review action: 'approved', 'feedback', or 'cancelled'")
     human_comment: Optional[str] = Field(None, description="Optional human comment or feedback")
     
-    @validator('review_action')
+    @field_validator('review_action')
     def validate_review_action(cls, v):
         return validate_approval_status(v)
 
@@ -120,10 +122,10 @@ class GraphStatusResponse(BaseModel):
     step_count: int = Field(default=0, description="Number of steps completed")
     approval_status: ApprovalStatusType = Field(default="unknown", description="Agent approval state: 'approved', 'feedback', or 'cancelled'")
     
-    @validator('execution_status')
+    @field_validator('execution_status')
     def validate_execution_status(cls, v):
         return validate_execution_status(v)
     
-    @validator('approval_status')
+    @field_validator('approval_status')
     def validate_approval_status(cls, v):
         return validate_approval_status(v) 

@@ -9,9 +9,8 @@ import asyncio
 
 from src.models.schemas import StartRequest, GraphResponse, GraphStatusResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
-from src.services.explainable_agent import ExplainableAgent
+from src.services.explainable_agent import ExplainableAgent, ExplainableAgentState
 from langchain_core.messages import HumanMessage
-from src.services.explainable_agent import ExplainableAgentState
 from src.models.database import get_mongo_memory, get_mongodb
 
 router = APIRouter(
@@ -114,7 +113,7 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                  
                 from src.models.schemas import FinalResult
                 final_result = FinalResult(
-                    summary=assistant_response[:200] + "..." if len(assistant_response) > 200 else assistant_response,
+                    summary=assistant_response,
                     details=f"Executed {len(steps)} steps successfully",
                     source="Database query execution",
                     inference="Based on database analysis and tool execution",
@@ -162,7 +161,11 @@ def start_graph(
             plan="",
             steps=[],
             step_counter=0,
-            status="approved"  
+            status="approved",
+            assistant_response="",
+            use_planning=request.use_planning,  # Set planning preference from API
+            agent_type="data_exploration_agent",  # Default, will be set by assistant node
+            routing_reason=""  # Will be filled by assistant node
         )
         
         return run_graph_and_response(agent, initial_state, config)

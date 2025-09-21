@@ -22,8 +22,9 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
   const [showActions, setShowActions] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
 
-  // Find the currently selected thread
+ 
   const selectedThread = threads.find(t => t.thread_id === selectedThreadId);
 
   // Load threads when component mounts or dropdown opens
@@ -51,12 +52,14 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
     onThreadSelect(threadId);
     setIsOpen(false);
     setShowActions(null);
+    setMenuPosition(null);
   };
 
   const handleNewThread = () => {
     onNewThread();
     setIsOpen(false);
     setShowActions(null);
+    setMenuPosition(null);
   };
 
   const handleDeleteThread = async (threadId: string, e: React.MouseEvent) => {
@@ -76,6 +79,7 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
       }
       
       setShowActions(null);
+      setMenuPosition(null);
     } catch (err) {
       console.error('Error deleting thread:', err);
       alert('Failed to delete thread');
@@ -87,6 +91,7 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
     setEditingTitle(threadId);
     setNewTitle(currentTitle || 'Untitled Chat');
     setShowActions(null);
+    setMenuPosition(null);
   };
 
   const handleSaveTitle = async (threadId: string) => {
@@ -110,6 +115,7 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
   const handleCancelEdit = () => {
     setEditingTitle(null);
     setNewTitle('');
+    setMenuPosition(null);
   };
 
   const formatDate = (dateStr: string) => {
@@ -238,6 +244,11 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setMenuPosition({
+                            top: rect.bottom + 4,
+                            left: rect.right - 120 // Position menu to the right of the button
+                          });
                           setShowActions(showActions === thread.thread_id ? null : thread.thread_id);
                         }}
                         className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all"
@@ -247,8 +258,14 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
                     )}
 
                     {/* Actions Menu */}
-                    {showActions === thread.thread_id && (
-                      <div className="absolute right-2 top-12 bg-white border border-gray-300 rounded-lg shadow-lg z-10 min-w-32">
+                    {showActions === thread.thread_id && menuPosition && (
+                      <div 
+                        className="fixed bg-white border border-gray-300 rounded-lg shadow-lg z-50 min-w-32"
+                        style={{
+                          top: `${menuPosition.top}px`,
+                          left: `${menuPosition.left}px`
+                        }}
+                      >
                         <button
                           onClick={(e) => handleEditTitle(thread.thread_id, thread.title || '', e)}
                           className="w-full flex items-center gap-2 p-2 hover:bg-gray-50 text-left text-sm"
@@ -290,6 +307,7 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
             setIsOpen(false);
             setShowActions(null);
             setEditingTitle(null);
+            setMenuPosition(null);
           }}
         />
       )}

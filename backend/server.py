@@ -13,9 +13,6 @@ from langchain_deepseek import ChatDeepSeek
 from src.models.config import settings
 from src.models.schemas import QueryRequest, QueryResponse
 from src.services.explainable_agent import ExplainableAgent
-from src.services.explainable_agent_copy import ParallelExplainableAgent
-from src.services.simple_agent import SimpleAgent
-from src.services.async_simple_agent import AsyncSimpleAgent
 
 from routers import graph, test_stream, chat_history, explorer, llm, streaming_graph
 from src.models.database import mongodb_manager, get_mongodb
@@ -154,15 +151,6 @@ def get_llm(request: Request):
 
 def get_explainable_agent(request: Request) -> ExplainableAgent:
     return request.app.state.explainable_agent
-
-def get_simple_agent(request: Request) -> SimpleAgent:
-    return request.app.state.simple_agent
-
-def get_async_simple_agent(request: Request) -> AsyncSimpleAgent:
-    return request.app.state.async_simple_agent
-
-def get_parallel_agent(request: Request) -> ParallelExplainableAgent:
-    return request.app.state.parallel_agent
 
 # Routes with Dependency Injection
 @app.get("/health")

@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Message } from '../types/chat';
 import { ExplorerRenderer } from './renderers/ExplorerRenderer';
 import { markdownComponents } from '../utils/markdownComponents';
@@ -24,7 +25,10 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
       case 'message':
       default:
         return (
-          <ReactMarkdown components={markdownComponents}>
+          <ReactMarkdown 
+            components={markdownComponents}
+            remarkPlugins={[remarkGfm]}
+          >
             {message.content}
           </ReactMarkdown>
         );
