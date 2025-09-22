@@ -27,6 +27,12 @@ export const API_ENDPOINTS = {
   GRAPH_START: '/graph/start',
   GRAPH_RESUME: '/graph/resume',
   GRAPH_STATUS: (threadId: string) => `/graph/status/${threadId}`,
+  
+  // Streaming Graph endpoints
+  STREAMING_GRAPH_START: '/graph/stream/start',
+  STREAMING_GRAPH_RESUME: '/graph/stream/resume',
+  STREAMING_GRAPH_STREAM: (threadId: string) => `/graph/stream/${threadId}`,
+  STREAMING_GRAPH_RESULT: (threadId: string) => `/graph/stream/result/${threadId}`,
 } as const;
 
 // Helper function to build URLs

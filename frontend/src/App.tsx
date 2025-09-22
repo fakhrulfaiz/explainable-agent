@@ -1,8 +1,9 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Header } from './components';
-import { ChatWithApproval, SimpleChat, Demo, StreamingTutorial, Login, SignUp, ForgotPassword, UpdatePassword, AuthConfirm } from './pages';
+import { ChatWithApproval, StreamingTutorial, Login, SignUp, ForgotPassword, UpdatePassword, AuthConfirm } from './pages';
 import { AuthProvider } from './contexts/AuthContext';
+import { UIStateProvider } from './contexts/UIStateContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import './App.css';
 
@@ -41,7 +42,9 @@ const App: React.FC = () => {
   return (
     <Router>
       <AuthProvider>
-        <AppContent />
+        <UIStateProvider>
+          <AppContent />
+        </UIStateProvider>
       </AuthProvider>
     </Router>
   );

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Send, ThumbsUp, ThumbsDown, RotateCcw } from 'lucide-react';
 import { Message as MessageType, ChatComponentProps, HandlerResponse } from '../types/chat';
+import { useUIState } from '../contexts/UIStateContext';
 import Message from './Message';
 import FeedbackForm from './FeedbackForm';
 import LoadingIndicator from './LoadingIndicator';
@@ -12,23 +13,30 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   onFeedback,
   onCancel,
   onRetry,
-  onMessageCreated,
   currentThreadId,
   initialMessages = [],
   className = "",
   placeholder = "Type your message...",
-  showApprovalButtons = true,
   disabled = false,
   renderBelowLastMessage
 }) => {
+  // Use UI state context for loading and execution state
+  const { state, setExecutionStatus, setLoading } = useUIState();
+  
   const [messages, setMessages] = useState<MessageType[]>(initialMessages);
   const [inputValue, setInputValue] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [pendingApproval, setPendingApproval] = useState<number | null>(null);
   const [showFeedbackForm, setShowFeedbackForm] = useState<boolean>(false);
   const [feedbackText, setFeedbackText] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  
+  // Use shared state from context
+  const isLoading = state.isLoading;
+  const contextThreadId = state.currentThreadId;
+  const showApprovalButtons = pendingApproval !== null && state.executionStatus === 'user_feedback';
+  
+
 
   const scrollToBottom = (): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,11 +62,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   }, [memoizedInitialMessages]);
 
   // Helper function to handle response and create explorer message if needed
-  const handleResponse = useCallback((response: string | HandlerResponse): string => {
-    if (typeof response === 'string') {
-      return response;
-    }
-    
+  const handleResponse = useCallback((response: HandlerResponse): string => {
     // If response has explorer data, create explorer message
     if (response.explorerData) {
       const explorerMessage: MessageType = {
@@ -68,7 +72,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         timestamp: new Date(),
         messageType: 'explorer',
         metadata: { explorerData: response.explorerData },
-        threadId: currentThreadId || undefined
+        threadId: contextThreadId || currentThreadId || undefined
       };
       
       // Add explorer message after a short delay to ensure proper ordering
@@ -77,18 +81,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       }, 50);
     }
     
+
+    
     return response.message;
-  }, [currentThreadId]);
+  }, [contextThreadId, currentThreadId]);
 
   const handleSend = async (): Promise<void> => {
     if (!inputValue.trim() || isLoading || disabled) return;
 
     const userMessage = inputValue.trim();
     setInputValue('');
-    setIsLoading(true);
     setPendingApproval(null);
 
-    // Add user message immediately
     const newUserMessage: MessageType = {
       id: Date.now(),
       role: 'user',
@@ -99,11 +103,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     setMessages(prev => [...prev, newUserMessage]);
 
     try {
-      // Call the parent's message handler
       const response = await onSendMessage(userMessage, messages);
       
-      // Handle response (could be string or HandlerResponse)
+      
       const messageContent = handleResponse(response);
+      
       
       // Add assistant response
       const assistantMessage: MessageType = {
@@ -111,16 +115,19 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         role: 'assistant',
         content: messageContent,
         timestamp: new Date(),
-        needsApproval: showApprovalButtons,
-        threadId: currentThreadId || undefined
+        needsApproval: response.needsApproval,
+        threadId: contextThreadId || currentThreadId || undefined
       };
-
-      setMessages(prev => [...prev, assistantMessage]);
       
-      if (showApprovalButtons) {
+
+        setMessages(prev => [...prev, assistantMessage]);
+        console.log('🔍 DEBUG: state.pendingApproval:', response.needsApproval);
+      if (response.needsApproval) {
         setPendingApproval(assistantMessage.id);
         setShowFeedbackForm(false);
         setFeedbackText('');
+      } else {
+        setPendingApproval(null);
       }
 
     } catch (error) {
@@ -134,19 +141,20 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       };
 
       setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
-    }
+    } 
   };
 
   const handleApprove = async (messageId: number): Promise<void> => {
+  
     const message = messages.find(m => m.id === messageId);
-    if (!message) return;
-
-    setPendingApproval(null);
+    if (!message) {
+      return;
+    }
     setShowFeedbackForm(false);
     setFeedbackText('');
-    setIsLoading(true);
+    setPendingApproval(null);
+    setExecutionStatus('running');
+    setLoading(true);
     
     // Update message to show it's approved
     setMessages(prev => prev.map(m => 
@@ -207,19 +215,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
 
         setMessages(prev => [...prev, errorMessage]);
       }
-    } finally {
-      setIsLoading(false);
     }
+    finally {
+      setLoading(false);
+      }
   };
 
   const handleFeedback = async (messageId: number): Promise<void> => {
     const message = messages.find(m => m.id === messageId);
     if (!message) return;
 
-    setPendingApproval(null);
     setShowFeedbackForm(false);
     setFeedbackText('');
-    setIsLoading(true);
 
     // Update message to show it's cancelled
     setMessages(prev => prev.map(m => 
@@ -253,11 +260,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
           
           if (isNewPlan) {
             setPendingApproval(resultMessage.id);
-            
-            // Notify parent that a new message was created that needs approval
-            if (onMessageCreated) {
-              onMessageCreated(resultMessage.id);
-            }
           }
         }
       }
@@ -296,12 +298,12 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         setMessages(prev => [...prev, errorMessage]);
       }
     } finally {
-      setIsLoading(false);
-    }
+      setLoading(false);
+      }
   };
 
   const handleSendFeedback = async (): Promise<void> => {
-    if (!feedbackText.trim() || !pendingApproval) return;
+    if (!feedbackText.trim() || !pendingApproval ) return;
 
     const message = messages.find(m => m.id === pendingApproval);
     if (!message) return;
@@ -318,8 +320,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     setMessages(prev => [...prev, feedbackMessage]);
     setFeedbackText('');
     setShowFeedbackForm(false);
-    setPendingApproval(null);
-    setIsLoading(true);
 
     // Update the original message to show it received feedback
     setMessages(prev => prev.map(m => 
@@ -351,12 +351,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
           setMessages(prev => [...prev, resultMessage]);
           
           if (isNewPlan) {
-            setPendingApproval(resultMessage.id);
-            
-            // Notify parent that a new message was created that needs approval
-            if (onMessageCreated) {
-              onMessageCreated(resultMessage.id);
-            }
+            // New plan generated, needs approval
           }
         }
       }
@@ -371,19 +366,27 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       };
 
       setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
     }
+    // Note: Loading state cleanup is handled by the parent component
   };
 
   const handleCancel = async (messageId: number): Promise<void> => {
-    const message = messages.find(m => m.id === messageId);
-    if (!message) return;
-
-    setPendingApproval(null);
+    // If messageId is 0, find the latest message that needs approval
+    let message;
+    if (messageId === 0) {
+      message = messages.find(m => m.needsApproval === true);
+    } else {
+      message = messages.find(m => m.id === messageId);
+    }
+    
+    if (!message) {
+      return;
+    }
     setShowFeedbackForm(false);
     setFeedbackText('');
-    setIsLoading(true);
+    setPendingApproval(null);
+    setExecutionStatus('running');
+    setLoading(true);
 
     // Update message to show it's cancelled
     setMessages(prev => prev.map(m => 
@@ -399,13 +402,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         
         // If the cancel handler returns a result, add it as a new message
         if (result) {
-          // Handle response (could be string or HandlerResponse)
-          const messageContent = handleResponse(result);
-          
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
-            content: messageContent,
+            content: result,
             timestamp: new Date(),
             needsApproval: false // Cancellation messages don't need approval
           };
@@ -425,13 +425,12 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
 
       setMessages(prev => [...prev, errorMessage]);
     } finally {
-      setIsLoading(false);
-    }
+      setLoading(false);
+      }
   };
 
   const clearChat = (): void => {
     setMessages([]);
-    setPendingApproval(null);
     setShowFeedbackForm(false);
     setFeedbackText('');
     inputRef.current?.focus();
@@ -445,7 +444,6 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     }
 
     console.log('Starting retry for message:', messageId, 'action:', message.retryAction);
-    setIsLoading(true);
 
     // Clear the timeout state and restore the message to its pre-timeout state
     setMessages(prev => prev.map(m => 
@@ -474,7 +472,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
             role: 'assistant',
             content: messageContent,
             timestamp: new Date(),
-            threadId: currentThreadId || undefined
+            threadId: contextThreadId || currentThreadId || undefined
           };
           
           setMessages(prev => [...prev, resultMessage]);
@@ -520,8 +518,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         setMessages(prev => [...prev, errorMessage]);
       }
     } finally {
-      setIsLoading(false);
-    }
+      setLoading(false);
+      }
+    // Note: Loading state cleanup is handled by the parent component
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -603,14 +602,14 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
               Send Feedback
             </button>
             <button
-              onClick={() => handleApprove(pendingApproval)}
+              onClick={() => pendingApproval && handleApprove(pendingApproval)}
               className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
             >
               <ThumbsUp className="w-4 h-4" />
               Approve
             </button>
             <button
-              onClick={() => handleCancel(pendingApproval)}
+              onClick={() => pendingApproval && handleCancel(pendingApproval)}
               className="flex items-center gap-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
             >
               <ThumbsDown className="w-4 h-4" />

@@ -34,8 +34,7 @@ class ApiClient {
         } catch (error) {
           console.warn('Failed to get auth token:', error);
         }
-        
-        // Add request timestamp
+   
         console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
         return config;
       },
@@ -53,8 +52,7 @@ class ApiClient {
       },
       async (error) => {
         console.error('Response Error:', error.response?.data || error.message);
-        
-        // Handle common error cases
+  
         if (error.response?.status === 401) {
           // Unauthorized - sign out and redirect
           try {

@@ -15,7 +15,6 @@ security = HTTPBearer()
 
 class SupabaseAuth:
    
-    
     def __init__(self):
         self.supabase_jwt_secret = os.getenv("SUPABASE_JWT_SECRET") 
         self.environment = os.getenv("ENVIRONMENT", "development")
@@ -70,7 +69,6 @@ class SupabaseAuth:
 
 
     async def get_current_user(self, credentials: HTTPAuthorizationCredentials) -> SupabaseUser:
-        """Get current user from JWT token"""
         payload = await self.verify_token(credentials.credentials)
         return SupabaseUser.from_jwt_payload(payload)
     
@@ -82,12 +80,10 @@ supabase_auth = SupabaseAuth()
 
 # Dependency functions
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> SupabaseUser:
-    """Dependency to get current authenticated user"""
     return await supabase_auth.get_current_user(credentials)
 
 
 async def get_optional_user(request: Request) -> Optional[SupabaseUser]:
-    """Optional authentication - returns None if no token or invalid token"""
     try:
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
@@ -97,7 +93,6 @@ async def get_optional_user(request: Request) -> Optional[SupabaseUser]:
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         return await get_current_user(credentials)
     except HTTPException:
-        # Auth failed, but that's OK for optional auth
         return None
     except Exception as e:
         logger.warning(f"Optional auth error: {str(e)}")

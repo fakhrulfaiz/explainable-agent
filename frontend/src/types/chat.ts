@@ -25,6 +25,7 @@ export interface Message {
 export interface HandlerResponse {
   message: string;
   explorerData?: any;
+  needsApproval?: boolean;
   // Future extensibility:
   // attachments?: File[];
   // metadata?: Record<string, any>;
@@ -32,17 +33,15 @@ export interface HandlerResponse {
 }
 
 export interface ChatComponentProps {
-  onSendMessage: (message: string, messageHistory: Message[]) => Promise<string | HandlerResponse>;
-  onApprove?: (content: string, message: Message) => Promise<string | HandlerResponse | void> | string | HandlerResponse | void;
-  onFeedback?: (content: string, message: Message) => Promise<string | HandlerResponse | void> | string | HandlerResponse | void;
-  onCancel?: (content: string, message: Message) => Promise<string | HandlerResponse | void> | string | HandlerResponse | void;
-  onRetry?: (message: Message) => Promise<string | HandlerResponse | void> | string | HandlerResponse | void;
-  onMessageCreated?: (messageId: number) => void;
+  onSendMessage: (message: string, messageHistory: Message[]) => Promise<HandlerResponse>;
+  onApprove?: (content: string, message: Message) => Promise<HandlerResponse | void> | HandlerResponse | void;
+  onFeedback?: (content: string, message: Message) => Promise<HandlerResponse | void> | HandlerResponse | void;
+  onCancel?: (content: string, message: Message) => Promise<string> | string;
+  onRetry?: (message: Message) => Promise<HandlerResponse | void> | HandlerResponse | void;
   currentThreadId?: string | null;
   initialMessages?: Message[];
   className?: string;
   placeholder?: string;
-  showApprovalButtons?: boolean;
   disabled?: boolean;
   renderBelowLastMessage?: React.ReactNode;
 }
