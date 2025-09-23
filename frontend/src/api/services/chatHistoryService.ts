@@ -29,6 +29,19 @@ export interface AddMessageRequest {
   content: string;
   message_type?: 'message' | 'explorer';
   checkpoint_id?: string;
+  
+  // Additional fields from frontend Message interface
+  message_id?: number;
+  needs_approval?: boolean;
+  approved?: boolean;
+  disapproved?: boolean;
+  is_error?: boolean;
+  is_feedback?: boolean;
+  has_timed_out?: boolean;
+  can_retry?: boolean;
+  retry_action?: 'approve' | 'feedback' | 'cancel';
+  thread_id_ref?: string;
+  metadata?: { [key: string]: any };
 }
 
 export interface ChatHistoryResponse {

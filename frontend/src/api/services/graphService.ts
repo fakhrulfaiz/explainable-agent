@@ -133,7 +133,7 @@ export class GraphService {
     eventSource.addEventListener('token', (event) => {
       try {
         const data = JSON.parse(event.data);
-        onMessageCallback({ content: data.content });
+        onMessageCallback({ content: data.content, node: data.node, type: data.type });
       } catch (error) {
         console.error("Error parsing token event:", error, "Raw data:", event.data);
         onErrorCallback(error as Error);
@@ -168,11 +168,11 @@ export class GraphService {
       console.log("Stream resumed:", event.data);
     });
     
-    // Handle message events (complete messages)
+    // Handle message events (complete messages) - normalize shape to match 'token'
     eventSource.addEventListener('message', (event) => {
       try {
         const data = JSON.parse(event.data);
-        onMessageCallback({ message: data });
+        onMessageCallback({ content: data.content, node: data.node, type: data.type || 'message' });
       } catch (error) {
         console.error("Error parsing message event:", error, "Raw data:", event.data);
         onErrorCallback(error as Error);

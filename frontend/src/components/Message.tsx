@@ -10,8 +10,6 @@ const Message: React.FC<MessageComponentProps> = ({
   const handleAction = (action: string, data?: any) => {
     switch (action) {
       case 'openExplorer':
-        // This would need to be passed down from parent component
-        // For now, we'll use a custom event or callback
         if ((window as any).openExplorer) {
           (window as any).openExplorer(data);
         }

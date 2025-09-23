@@ -10,18 +10,23 @@ export interface UIState {
   
   // Loading state
   isLoading: boolean;
+  
+  // Streaming preference
+  useStreaming: boolean;
 }
 
 export type UIAction = 
   | { type: 'SET_EXECUTION_STATUS'; payload: ExecutionStatus }
   | { type: 'SET_THREAD_ID'; payload: string | null }
   | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_USE_STREAMING'; payload: boolean }
   | { type: 'RESET_STATE' };
 
 const initialState: UIState = {
   executionStatus: 'idle',
   currentThreadId: null,
   isLoading: false,
+  useStreaming: true,
 };
 
 function uiStateReducer(state: UIState, action: UIAction): UIState {
@@ -34,6 +39,9 @@ function uiStateReducer(state: UIState, action: UIAction): UIState {
     
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload };
+    
+    case 'SET_USE_STREAMING':
+      return { ...state, useStreaming: action.payload };
     
     case 'RESET_STATE':
       return initialState;
@@ -51,6 +59,7 @@ interface UIStateContextType {
   setExecutionStatus: (status: ExecutionStatus) => void;
   setThreadId: (threadId: string | null) => void;
   setLoading: (loading: boolean) => void;
+  setUseStreaming: (useStreaming: boolean) => void;
   resetState: () => void;
 }
 
@@ -68,6 +77,9 @@ export function UIStateProvider({ children }: { children: ReactNode }) {
   const setLoading = (loading: boolean) => 
     dispatch({ type: 'SET_LOADING', payload: loading });
   
+  const setUseStreaming = (useStreaming: boolean) =>
+    dispatch({ type: 'SET_USE_STREAMING', payload: useStreaming });
+  
   const resetState = () => dispatch({ type: 'RESET_STATE' });
 
   const value: UIStateContextType = {
@@ -76,6 +88,7 @@ export function UIStateProvider({ children }: { children: ReactNode }) {
     setExecutionStatus,
     setThreadId,
     setLoading,
+    setUseStreaming,
     resetState,
   };
 

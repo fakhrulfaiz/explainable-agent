@@ -75,7 +75,6 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
     input_state = None
     if run_data["type"] == "start":
         event_type = "start"
-        # Create the initial state for start operations
         initial_state = ExplainableAgentState(
             messages=[HumanMessage(content=run_data["human_request"])],
             query=run_data["human_request"],
@@ -93,10 +92,10 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
             state_update["human_comment"] = run_data["human_comment"]
         
         agent.graph.update_state(config, state_update)
-        # For resume operations, we pass None as the input state
         input_state = None
     
     async def event_generator():       
+        buffer = ""
         # Initial event with thread_id
         initial_data = json.dumps({"thread_id": thread_id})
         print(f"DEBUG: Sending initial {event_type} event with data: {initial_data}")
@@ -112,43 +111,60 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
                     
                 # Stream tokens from AI messages for real-time display
                 if hasattr(msg, 'content') and msg.content:
-                    if type(msg).__name__ in [ 'AIMessageChunk']:
+                    if type(msg).__name__ in ['AIMessageChunk']:
                         # Check if it's not a tool call (actual assistant response)
                         if not hasattr(msg, 'tool_calls') or not msg.tool_calls:
                             node_name = metadata.get('langgraph_node', 'unknown')
-                            
-                            # Send small tokens for real-time streaming display
-                            if type(msg).__name__ == 'AIMessageChunk':
+                            # Filter: only emit tokens/messages from planner or agent nodes
+                            if node_name not in ['planner', 'agent']:
+                                continue
+                        
+                            # Preserve whitespace inside chunks to avoid concatenated words
+                            chunk_text = msg.content
+                            if chunk_text.startswith("{") or buffer:
+                                buffer += chunk_text
+                                try:
+                                    parsed = json.loads(buffer)
+                                   
+                                    yield {
+                                    "event": "message",
+                                    "data": json.dumps({
+                                        "content": parsed.get("content", ""),
+                                        "node": node_name,
+                                        "type": "feedback_answer"
+                                        })
+                                        }
+                                    buffer = ""  # reset after full parse
+                                    
+                                except json.JSONDecodeError:
+                                    continue
+                            else:
+                                # Normal token streaming
                                 token_data = json.dumps({
-                                    "content": msg.content,
-                                    "node": node_name,
-                                    "type": "chunk"
-                                })
+                                "content": msg.content,
+                                "node": node_name,
+                                "type": "chunk"
+                                 })
                                 yield {"event": "token", "data": token_data}
-                            
-                            # Send complete messages for saving/final processing
-                            elif len(msg.content) > 50:  # Only send substantial complete messages
-                                final_data = json.dumps({
-                                    "content": msg.content,
-                                    "node": node_name,
-                                    "type": "complete"
-                                })
-                                yield {"event": "message", "data": final_data}
+                    elif type(msg).__name__ in ['AIMessage']:
+                        node_name = metadata.get('langgraph_node', 'unknown')
+                        yield {"event": "message", "data": json.dumps({
+                            "content": msg.content,
+                            "node": node_name,
+                            "type": "message"
+                        })}
             
             # After streaming completes, check if human feedback is needed
             state = agent.graph.get_state(config)
             if state.next and 'human_feedback' in state.next:
                 status_data = json.dumps({"status": "user_feedback"})
-                print(f"DEBUG: Sending status event (feedback): {status_data}")
                 yield {"event": "status", "data": status_data}
             else:
                 status_data = json.dumps({"status": "finished"})
-                print(f"DEBUG: Sending status event (finished): {status_data}")
                 yield {"event": "status", "data": status_data}
                 
             # Clean up the thread configuration after streaming is complete
             if thread_id in run_configs:
-                print(f"DEBUG: Cleaning up thread_id={thread_id} from run_configs")
                 del run_configs[thread_id]
                 
         except Exception as e:

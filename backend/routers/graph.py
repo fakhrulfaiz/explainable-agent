@@ -392,7 +392,11 @@ async def start_graph_stream(
                 plan="",
                 steps=[],
                 step_counter=0,
-                status="approved"
+                status="approved",
+                assistant_response="",
+                use_planning=request.use_planning,
+                agent_type="data_exploration_agent",
+                routing_reason=""
             )
             
             # Send initial status

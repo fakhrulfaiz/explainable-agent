@@ -18,7 +18,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   className = "",
   placeholder = "Type your message...",
   disabled = false,
-  renderBelowLastMessage
+  onMessageCreated
 }) => {
   // Use UI state context for loading and execution state
   const { state, setExecutionStatus, setLoading } = useUIState();
@@ -30,12 +30,16 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   const [feedbackText, setFeedbackText] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Streaming UI state
+  const [streamingActive, setStreamingActive] = useState<boolean>(false);
   
   // Use shared state from context
   const isLoading = state.isLoading;
   const contextThreadId = state.currentThreadId;
   const showApprovalButtons = pendingApproval !== null && state.executionStatus === 'user_feedback';
-  
+  const USE_STREAMING = state.useStreaming;
+  const messagesRef = useRef<MessageType[]>([]);
+
 
 
   const scrollToBottom = (): void => {
@@ -47,6 +51,16 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       scrollToBottom();
     }
   }, [messages]);
+
+  // Mirror messages into a ref for post-await access
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Observe execution status changes for debugging
+  useEffect(() => {
+    console.log('ChatComponent: executionStatus changed ->', state.executionStatus);
+  }, [state.executionStatus]);
 
 
   // Memoize initialMessages to prevent unnecessary re-renders
@@ -61,33 +75,69 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     setMessages(memoizedInitialMessages);
   }, [memoizedInitialMessages]);
 
+  // Separate method for creating explorer messages (as suggested)
+  const createExplorerMessage = useCallback((response: HandlerResponse): void => {
+    if (!response.explorerData) return;
+    
+    const explorerMessage: MessageType = {
+      id: Date.now() + 100, // Ensure unique ID
+      role: 'assistant',
+      content: response.message,
+      timestamp: new Date(),
+      messageType: 'explorer',
+      checkpointId: response.explorerData.checkpoint_id, // ✅ FIXED: Use actual checkpoint_id
+      metadata: { explorerData: response.explorerData },
+      threadId: contextThreadId || currentThreadId || undefined
+    };
+    
+    // Add explorer message after a short delay to ensure proper ordering
+    setTimeout(() => {
+      setMessages(prev => [...prev, explorerMessage]);
+      if (typeof onMessageCreated === 'function') {
+        onMessageCreated(explorerMessage);
+      }
+    }, 50);
+  }, [contextThreadId, currentThreadId, onMessageCreated]);
+
   // Helper function to handle response and create explorer message if needed
   const handleResponse = useCallback((response: HandlerResponse): string => {
-    // If response has explorer data, create explorer message
+    // If response has explorer data, create explorer message using separate method
     if (response.explorerData) {
-      const explorerMessage: MessageType = {
-        id: Date.now() + 100, // Ensure unique ID
-        role: 'assistant',
-        content: response.message,
-        timestamp: new Date(),
-        messageType: 'explorer',
-        metadata: { explorerData: response.explorerData },
-        threadId: contextThreadId || currentThreadId || undefined
-      };
-      
-      // Add explorer message after a short delay to ensure proper ordering
-      setTimeout(() => {
-        setMessages(prev => [...prev, explorerMessage]);
-      }, 50);
+      createExplorerMessage(response);
     }
     
-
-    
     return response.message;
-  }, [contextThreadId, currentThreadId]);
+  }, [createExplorerMessage]);
+
+
+const appendToMessageContent = useCallback(
+  (messageId: number, appendContent: string): void => {
+    let parsedContent: string | null = null;
+
+    try {
+      const parsed = JSON.parse(appendContent);
+      if (parsed && typeof parsed === "object" && "content" in parsed) {
+        parsedContent = parsed.content;
+      }
+    } catch {
+    
+    }
+
+    const finalAppend = parsedContent ?? appendContent;
+    setMessages(prev =>
+      prev.map(m =>
+        m.id === messageId
+          ? { ...m, content: (m.content || "") + finalAppend }
+          : m
+      )
+    );
+  },
+  []
+);
+
 
   const handleSend = async (): Promise<void> => {
-    if (!inputValue.trim() || isLoading || disabled) return;
+    if (!inputValue.trim() || isLoading || disabled || streamingActive) return;
 
     const userMessage = inputValue.trim();
     setInputValue('');
@@ -97,19 +147,74 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       id: Date.now(),
       role: 'user',
       content: userMessage,
-      timestamp: new Date()
+      timestamp: new Date(),
+      threadId: contextThreadId || currentThreadId || undefined
     };
 
     setMessages(prev => [...prev, newUserMessage]);
+  if (typeof onMessageCreated === 'function') {
+    onMessageCreated(newUserMessage);
+  }
 
     try {
       const response = await onSendMessage(userMessage, messages);
-      
-      
+      if (response.isStreaming && response.streamingHandler) {
+        // Prepare a streaming assistant message
+        const streamingMsgId = Date.now() + 1;
+        const streamingMessage: MessageType = {
+          id: streamingMsgId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+          threadId: contextThreadId || currentThreadId || undefined,
+          isStreaming: true
+        } as any;
+        setMessages(prev => [...prev, streamingMessage]);
+        setStreamingActive(true);
+
+        try {
+          await response.streamingHandler(streamingMsgId, appendToMessageContent, (status) => {
+            if (!status) return;
+            console.log('ChatComponent: status via streamingHandler ->', status);
+            if (status === 'user_feedback') {
+              setMessages(prev => prev.map(m => 
+                m.id === streamingMsgId
+                  ? { ...m, isStreaming: false, needsApproval: true }
+                  : m
+              ));
+              setPendingApproval(streamingMsgId);
+            } else if (status === 'finished') {
+              setMessages(prev => prev.map(m => 
+                m.id === streamingMsgId
+                  ? { ...m, isStreaming: false }
+                  : m
+              ));
+            }
+            
+            if (typeof onMessageCreated === 'function') {
+                console.log('onMessageCreated called from:', new Error().stack);
+                setMessages(prev => {
+                    const finalMsg = prev.find(m => m.id === streamingMsgId);
+                    if (finalMsg) {
+                    console.log('Calling onMessageCreated for message:', streamingMsgId);
+                    setTimeout(() => onMessageCreated(finalMsg), 0);
+                  }
+                  return prev;
+                });
+            }
+          });               
+        } catch (streamErr) {
+          setMessages(prev => prev.map(m => 
+            m.id === streamingMsgId
+              ? { ...m, content: `Error: ${(streamErr as Error).message || 'Streaming failed'}`, isError: true, isStreaming: false }
+              : m
+          ));
+        } finally {
+          setStreamingActive(false);
+        }
+      } else {
       const messageContent = handleResponse(response);
-      
-      
-      // Add assistant response
+      console.log('ChatComponent: messageContent ->', messageContent);
       const assistantMessage: MessageType = {
         id: Date.now() + 1,
         role: 'assistant',
@@ -118,16 +223,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         needsApproval: response.needsApproval,
         threadId: contextThreadId || currentThreadId || undefined
       };
-      
-
         setMessages(prev => [...prev, assistantMessage]);
-        console.log('🔍 DEBUG: state.pendingApproval:', response.needsApproval);
+        if (typeof onMessageCreated === 'function') {
+          onMessageCreated(assistantMessage);
+        }
       if (response.needsApproval) {
         setPendingApproval(assistantMessage.id);
         setShowFeedbackForm(false);
         setFeedbackText('');
       } else {
         setPendingApproval(null);
+        }
       }
 
     } catch (error) {
@@ -141,6 +247,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       };
 
       setMessages(prev => [...prev, errorMessage]);
+      if (typeof onMessageCreated === 'function') {
+        onMessageCreated(errorMessage);
+      }
     } 
   };
 
@@ -156,30 +265,70 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     setExecutionStatus('running');
     setLoading(true);
     
-    // Update message to show it's approved
-    setMessages(prev => prev.map(m => 
-      m.id === messageId 
-        ? { ...m, approved: true, needsApproval: false }
-        : m
-    ));
+    
 
     try {
       // Call parent handler
       if (onApprove) {
         const result = await onApprove(message.content, message);
-        
         if (result) {
-          // Handle response (could be string or HandlerResponse)
-          const messageContent = handleResponse(result);
-          
+          if ((result as HandlerResponse).isStreaming && (result as HandlerResponse).streamingHandler) {
+            const streamingMsgId = Date.now() + 1;
+            const streamingMessage: MessageType = {
+              id: streamingMsgId,
+              role: 'assistant',
+              content: '',
+              timestamp: new Date(),
+              threadId: message.threadId || contextThreadId || currentThreadId || undefined,
+              isStreaming: true
+            } as any;
+            setMessages(prev => [...prev, streamingMessage]);
+            setStreamingActive(true);
+            try {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status) => {
+                if (!status) return;
+                if (status === 'user_feedback') {
+                  setMessages(prev => prev.map(m => 
+                    m.id === streamingMsgId ? { ...m, isStreaming: false, needsApproval: true } : m
+                  ));
+                  setPendingApproval(streamingMsgId);
+                } else if (status === 'finished') {
+                  setMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, isStreaming: false } : m));
+                }
+                if (typeof onMessageCreated === 'function') {
+                  setMessages(prev => {
+                    const finalMsg = prev.find(m => m.id === streamingMsgId);
+                    if (finalMsg) setTimeout(() => onMessageCreated(finalMsg), 0);
+                    return prev;
+                  });
+                }
+              });
+            } catch (streamErr) {
+              setMessages(prev => prev.map(m => 
+                m.id === streamingMsgId
+                  ? { ...m, content: `Error: ${(streamErr as Error).message || 'Streaming failed'}`, isError: true, isStreaming: false }
+                  : m
+              ));
+              if (typeof onMessageCreated === 'function') {
+                const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
+                if (finalMsg) onMessageCreated(finalMsg);
+              }
+            } finally {
+              setStreamingActive(false);
+            }
+          } else {
+          const messageContent = handleResponse(result as HandlerResponse);
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
             content: messageContent,
             timestamp: new Date()
           };
-          
           setMessages(prev => [...prev, resultMessage]);
+            if (typeof onMessageCreated === 'function') {
+              onMessageCreated(resultMessage);
+            }
+          }
         }
       }
     } catch (error) {
@@ -239,27 +388,72 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       // Call parent handler
       if (onFeedback) {
         const result = await onFeedback(message.content, message);
-        
-        // If the feedback handler returns a result, add it as a new message
         if (result) {
-          // Handle response (could be string or HandlerResponse)
-          const messageContent = handleResponse(result);
-          
-          // Check if this is a cancellation message or a new plan
+          if ((result as HandlerResponse).isStreaming && (result as HandlerResponse).streamingHandler) {
+            const streamingMsgId = Date.now() + 1;
+            const streamingMessage: MessageType = {
+              id: streamingMsgId,
+              role: 'assistant',
+              content: '',
+              timestamp: new Date(),
+              threadId: message.threadId || contextThreadId || currentThreadId || undefined,
+              isStreaming: true
+            } as any;
+            setMessages(prev => [...prev, streamingMessage]);
+            setStreamingActive(true);
+            try {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status) => {
+                if (!status) return;
+                if (status === 'user_feedback') {
+                  setMessages(prev => prev.map(m => 
+                    m.id === streamingMsgId
+                      ? { ...m, isStreaming: false, needsApproval: true }
+                      : m
+                  ));
+                  setPendingApproval(streamingMsgId);
+                } else if (status === 'finished') {
+                  setMessages(prev => prev.map(m => 
+                    m.id === streamingMsgId
+                      ? { ...m, isStreaming: false }
+                      : m
+                  ));
+                }
+              });
+              if (typeof onMessageCreated === 'function') {
+                const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
+                if (finalMsg) onMessageCreated(finalMsg);
+              }
+            } catch (streamErr) {
+              setMessages(prev => prev.map(m => 
+                m.id === streamingMsgId
+                  ? { ...m, content: `Error: ${(streamErr as Error).message || 'Streaming failed'}`, isError: true, isStreaming: false }
+                  : m
+              ));
+              if (typeof onMessageCreated === 'function') {
+                const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
+                if (finalMsg) onMessageCreated(finalMsg);
+              }
+            } finally {
+              setStreamingActive(false);
+            }
+          } else {
+          const messageContent = handleResponse(result as HandlerResponse);
           const isNewPlan = messageContent.includes('This revised plan requires your approval');
-          
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
             content: messageContent,
             timestamp: new Date(),
-            needsApproval: isNewPlan // Only new plans need approval, not cancellations
+              needsApproval: isNewPlan
           };
-          
           setMessages(prev => [...prev, resultMessage]);
-          
+          if (typeof onMessageCreated === 'function') {
+            const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
+            if (finalMsg) onMessageCreated(finalMsg);
+          }
           if (isNewPlan) {
             setPendingApproval(resultMessage.id);
+            }
           }
         }
       }
@@ -318,6 +512,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     };
 
     setMessages(prev => [...prev, feedbackMessage]);
+    if (typeof onMessageCreated === 'function') {
+      const finalMsg = messagesRef.current.find(m => m.id === Date.now());
+      if (finalMsg) onMessageCreated(finalMsg);
+    }
     setFeedbackText('');
     setShowFeedbackForm(false);
 
@@ -332,14 +530,58 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       // Use the feedback handler instead of sending a new message
       if (onFeedback) {
         const result = await onFeedback(feedbackText.trim(), message);
-        
-        // If the feedback handler returns a result, add it as a new message
+  
         if (result) {
-          // Handle response (could be string or HandlerResponse)
-          const messageContent = handleResponse(result);
-          
+          if ((result as HandlerResponse).isStreaming && (result as HandlerResponse).streamingHandler) {
+            const streamingMsgId = Date.now() + 1;
+            const streamingMessage: MessageType = {
+              id: streamingMsgId,
+              role: 'assistant',
+              content: '',
+              timestamp: new Date(),
+              threadId: message.threadId || contextThreadId || currentThreadId || undefined,
+              isStreaming: true
+            } as any;
+            setMessages(prev => [...prev, streamingMessage]);
+            setStreamingActive(true);
+            try {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status) => {
+                if (!status) return;
+                if (status === 'user_feedback') {
+                  setMessages(prev => prev.map(m => 
+                    m.id === streamingMsgId
+                      ? { ...m, isStreaming: false, needsApproval: true }
+                      : m
+                  ));
+                  setPendingApproval(streamingMsgId);
+                } else if (status === 'finished') {
+                  setMessages(prev => prev.map(m => 
+                    m.id === streamingMsgId
+                      ? { ...m, isStreaming: false }
+                      : m
+                  ));
+                }
+                if (typeof onMessageCreated === 'function') {
+                  const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
+                  if (finalMsg) onMessageCreated(finalMsg);
+                }
+              });
+            } catch (streamErr) {
+              setMessages(prev => prev.map(m => 
+                m.id === streamingMsgId
+                  ? { ...m, content: `Error: ${(streamErr as Error).message || 'Streaming failed'}`, isError: true, isStreaming: false }
+                  : m
+              ));
+              if (typeof onMessageCreated === 'function') {
+                const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
+                if (finalMsg) onMessageCreated(finalMsg);
+              }
+            } finally {
+              setStreamingActive(false);
+            }
+    } else {
+          const messageContent = handleResponse(result as HandlerResponse);
           const isNewPlan = messageContent.includes('This revised plan requires your approval');
-          
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
@@ -347,27 +589,54 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
             timestamp: new Date(),
             needsApproval: isNewPlan
           };
-          
           setMessages(prev => [...prev, resultMessage]);
-          
+          if (typeof onMessageCreated === 'function') {
+            const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
+            if (finalMsg) onMessageCreated(finalMsg);
+          }
           if (isNewPlan) {
-            // New plan generated, needs approval
+            setPendingApproval(resultMessage.id);
+            }
           }
         }
       }
-
     } catch (error) {
-      const errorMessage: MessageType = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: `Error: ${(error as Error).message || 'Something went wrong'}`,
-        timestamp: new Date(),
-        isError: true
-      };
+      const errorMsg = (error as Error).message || 'Something went wrong';
+      const isTimeout = errorMsg.includes('timeout') || 
+                       errorMsg.includes('30000ms exceeded') || 
+                       errorMsg.includes('Request timed out') ||
+                       errorMsg.includes('ECONNABORTED') ||
+                       (error as any)?.code === 'ECONNABORTED';
+      
+      if (isTimeout) {
+        // Mark the message as timed out and retryable
+        setMessages(prev => prev.map(m => 
+          m.id === message.id 
+            ? { 
+                ...m, 
+                disapproved: false, 
+                hasTimedOut: true, 
+                canRetry: true, 
+                retryAction: 'feedback' as const,
+                threadId: message.threadId
+              }
+            : m
+        ));
+      } else {
+        // Add error message for non-timeout errors
+        const errorMessage: MessageType = {
+          id: Date.now() + 1,
+          role: 'assistant',
+          content: `Error during feedback: ${errorMsg}`,
+          timestamp: new Date(),
+          isError: true
+        };
 
-      setMessages(prev => [...prev, errorMessage]);
-    }
-    // Note: Loading state cleanup is handled by the parent component
+        setMessages(prev => [...prev, errorMessage]);
+      }
+    } finally {
+      setLoading(false);
+      }
   };
 
   const handleCancel = async (messageId: number): Promise<void> => {
@@ -411,6 +680,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
           };
           
           setMessages(prev => [...prev, resultMessage]);
+          if (typeof onMessageCreated === 'function') {
+            const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
+            if (finalMsg) onMessageCreated(finalMsg);
+          }
         }
       }
     } catch (error) {
@@ -424,6 +697,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       };
 
       setMessages(prev => [...prev, errorMessage]);
+      if (typeof onMessageCreated === 'function') {
+        const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
+        if (finalMsg) onMessageCreated(finalMsg);
+      }
     } finally {
       setLoading(false);
       }
@@ -476,6 +753,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
           };
           
           setMessages(prev => [...prev, resultMessage]);
+          if (typeof onMessageCreated === 'function') {
+            const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
+            if (finalMsg) onMessageCreated(finalMsg);
+          }
         }
       } else {
         // Fallback to local retry logic if no parent handler
@@ -535,6 +816,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50 rounded-t-lg">
         <h3 className="font-semibold text-gray-900">Chat</h3>
+        <div className="flex items-center gap-2">
+          {streamingActive && (
+            <div className="flex items-center text-blue-600 text-sm">
+              <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse mr-2"></div>
+              Streaming...
+            </div>
+          )}
+          {USE_STREAMING && (
+            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
+              Streaming Mode
+            </span>
+          )}
         <button
           onClick={clearChat}
           className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
@@ -542,6 +835,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
         >
           <RotateCcw className="w-4 h-4" />
         </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -566,9 +860,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
           ))
         )}
 
-        {/* Below-last-message slot */}
-        {messages.length > 0 && renderBelowLastMessage}
-
+    
         {/* Loading indicator */}
         {isLoading && <LoadingIndicator />}
 

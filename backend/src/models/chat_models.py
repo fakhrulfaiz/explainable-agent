@@ -12,6 +12,18 @@ class ChatMessage(BaseModel):
     message_type: Literal["message", "explorer"] = Field(default="message", description="Message type - message or explorer")
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
     
+    # Additional fields from frontend Message interface
+    message_id: Optional[int] = Field(None, description="Message ID from frontend")
+    needs_approval: Optional[bool] = Field(None, description="Whether message needs approval")
+    approved: Optional[bool] = Field(None, description="Whether message is approved")
+    disapproved: Optional[bool] = Field(None, description="Whether message is disapproved")
+    is_error: Optional[bool] = Field(None, description="Whether message is an error")
+    is_feedback: Optional[bool] = Field(None, description="Whether message is feedback")
+    has_timed_out: Optional[bool] = Field(None, description="Whether message has timed out")
+    can_retry: Optional[bool] = Field(None, description="Whether message can be retried")
+    retry_action: Optional[Literal["approve", "feedback", "cancel"]] = Field(None, description="Retry action type")
+    thread_id_ref: Optional[str] = Field(None, description="Thread ID reference from frontend")
+    
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
@@ -60,6 +72,19 @@ class AddMessageRequest(BaseModel):
     content: str = Field(..., description="Message content")
     message_type: Literal["message", "explorer"] = Field(default="message", description="Message type - message or explorer")
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
+    
+    # Additional fields from frontend Message interface
+    message_id: Optional[int] = Field(None, description="Message ID from frontend")
+    needs_approval: Optional[bool] = Field(None, description="Whether message needs approval")
+    approved: Optional[bool] = Field(None, description="Whether message is approved")
+    disapproved: Optional[bool] = Field(None, description="Whether message is disapproved")
+    is_error: Optional[bool] = Field(None, description="Whether message is an error")
+    is_feedback: Optional[bool] = Field(None, description="Whether message is feedback")
+    has_timed_out: Optional[bool] = Field(None, description="Whether message has timed out")
+    can_retry: Optional[bool] = Field(None, description="Whether message can be retried")
+    retry_action: Optional[Literal["approve", "feedback", "cancel"]] = Field(None, description="Retry action type")
+    thread_id_ref: Optional[str] = Field(None, description="Thread ID reference from frontend")
+    metadata: Optional[dict] = Field(None, description="Additional metadata")
 
 
 class ChatHistoryResponse(BaseModel):

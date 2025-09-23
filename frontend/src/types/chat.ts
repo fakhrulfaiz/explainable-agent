@@ -24,13 +24,17 @@ export interface Message {
 // Response object that handlers can return
 export interface HandlerResponse {
   message: string;
-  explorerData?: any;
   needsApproval?: boolean;
-  // Future extensibility:
-  // attachments?: File[];
-  // metadata?: Record<string, any>;
-  // actions?: ActionButton[];
+  explorerData?: any;
+  // New streaming properties
+  isStreaming?: boolean;
+  streamingHandler?: (
+    streamingMessageId: number, 
+    updateMessageCallback: (id: number, content: string) => void,
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error') => void
+  ) => Promise<void>;
 }
+
 
 export interface ChatComponentProps {
   onSendMessage: (message: string, messageHistory: Message[]) => Promise<HandlerResponse>;
@@ -43,7 +47,7 @@ export interface ChatComponentProps {
   className?: string;
   placeholder?: string;
   disabled?: boolean;
-  renderBelowLastMessage?: React.ReactNode;
+  onMessageCreated?: (message: Message) => void;
 }
 
 export interface MessageComponentProps {

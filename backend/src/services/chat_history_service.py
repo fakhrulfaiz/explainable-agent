@@ -78,7 +78,17 @@ class ChatHistoryService:
                 content=request.content,
                 timestamp=datetime.now(),
                 message_type=request.message_type,
-                checkpoint_id=request.checkpoint_id
+                checkpoint_id=request.checkpoint_id,
+                message_id=request.message_id,
+                needs_approval=request.needs_approval,
+                approved=request.approved,
+                disapproved=request.disapproved,
+                is_error=request.is_error,
+                is_feedback=request.is_feedback,
+                has_timed_out=request.has_timed_out,
+                can_retry=request.can_retry,
+                retry_action=request.retry_action,
+                thread_id_ref=request.thread_id_ref
             )
             
             success = await self.chat_thread_repo.add_message_to_thread(request.thread_id, message)
