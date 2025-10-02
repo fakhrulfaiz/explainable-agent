@@ -6,6 +6,7 @@ from typing import Annotated
 import logging
 import json
 import asyncio
+import time
 
 from src.models.schemas import StartRequest, GraphResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
@@ -96,6 +97,9 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
     
     async def event_generator():       
         buffer = ""
+        # Track previous state to detect step changes
+        previous_steps = []
+        
         # Initial event with thread_id
         initial_data = json.dumps({"thread_id": thread_id})
         print(f"DEBUG: Sending initial {event_type} event with data: {initial_data}")
@@ -108,46 +112,105 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
                 if await request.is_disconnected():
                     print("DEBUG: Client disconnected, breaking stream loop")
                     break
-                    
-                # Stream tokens from AI messages for real-time display
-                if hasattr(msg, 'content') and msg.content:
-                    if type(msg).__name__ in ['AIMessageChunk']:
-                        # Check if it's not a tool call (actual assistant response)
-                        if not hasattr(msg, 'tool_calls') or not msg.tool_calls:
-                            node_name = metadata.get('langgraph_node', 'unknown')
-                            # Filter: only emit tokens/messages from planner or agent nodes
-                            if node_name not in ['planner', 'agent']:
+                
+           
+                current_state = agent.graph.get_state(config)
+                if current_state and current_state.values:
+                    current_steps = current_state.values.get("steps", [])
+    
+                    # Emit step info when new steps are added
+                    if len(current_steps) > len(previous_steps):
+                        new_steps = current_steps[len(previous_steps):]
+                        for step in new_steps:
+                            # Only emit steps that have both tool_name and decision
+                            if not step.get("tool_name") or not step.get("decision"):
                                 continue
-                        
-                            # Preserve whitespace inside chunks to avoid concatenated words
-                            chunk_text = msg.content
-                            if chunk_text.startswith("{") or buffer:
-                                buffer += chunk_text
-                                try:
-                                    parsed = json.loads(buffer)
-                                   
-                                    yield {
-                                    "event": "message",
-                                    "data": json.dumps({
-                                        "content": parsed.get("content", ""),
-                                        "node": node_name,
-                                        "type": "feedback_answer"
-                                        })
-                                        }
-                                    buffer = ""  # reset after full parse
-                                    
-                                except json.JSONDecodeError:
-                                    continue
-                            else:
-                                # Normal token streaming
-                                token_data = json.dumps({
-                                "content": msg.content,
+                            
+                            step_data = json.dumps({
+                                "step": {
+                                    "id": step.get("id", 0),
+                                    "tool_name": step.get("tool_name", ""),
+                                    "decision": step.get("decision", "")
+                                }
+                            })
+                            yield {"event": "step_added", "data": step_data}
+                            previous_steps = current_steps.copy()
+                    
+                    
+                # Handle different message types
+                node_name = metadata.get('langgraph_node', 'unknown')
+                
+                # Handle tool calls (these might not have content)
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    # Filter: only emit tool calls from planner or agent nodes
+                    if node_name in ['agent']:
+                        print(f"DEBUG: Found tool calls in {node_name}: {[tc.get('name') for tc in msg.tool_calls]}")
+                        for tool_call in msg.tool_calls:
+                            tool_name = tool_call.get('name', '')
+                            tool_id = tool_call.get('id', '')
+                            
+                            # Skip empty or invalid tool calls
+                            if not tool_name or not tool_id:
+                                print(f"DEBUG: Skipping invalid tool call: name='{tool_name}', id='{tool_id}'")
+                                continue
+                                
+                            tool_call_data = json.dumps({
+                                "status": "tool_call",
+                                "tool_name": tool_name,
                                 "node": node_name,
-                                "type": "chunk"
-                                 })
-                                yield {"event": "token", "data": token_data}
+                                "tool_id": tool_id
+                            })
+                            print(f"DEBUG: Emitting tool_call event: {tool_call_data}")
+                            yield {"event": "tool_call", "data": tool_call_data}
+                
+                # Handle tool results (from ToolMessage)
+                elif hasattr(msg, 'tool_call_id') and hasattr(msg, 'content'):
+                    # This is a tool result message 
+                    print(f"DEBUG: Found tool result for call_id: {msg.tool_call_id}")
+                    tool_result_data = json.dumps({
+                        "status": "tool_result",
+                        "tool_call_id": msg.tool_call_id,
+                        "node": node_name,
+                        "content": msg.content[:200] + "..." if len(msg.content) > 200 else msg.content  # Truncate long results
+                    })
+                    print(f"DEBUG: Emitting tool_result event: {tool_result_data}")
+                    yield {"event": "tool_result", "data": tool_result_data}
+                
+                # Stream tokens from AI messages for real-time display
+                elif hasattr(msg, 'content') and msg.content:
+                    if type(msg).__name__ in ['AIMessageChunk']:
+                        # Filter: only emit tokens/messages from planner or agent nodes
+                        if node_name not in ['planner', 'agent']:
+                            continue
+                    
+                        # Preserve whitespace inside chunks to avoid concatenated words
+                        chunk_text = msg.content
+                        if chunk_text.startswith("{") or buffer:
+                            buffer += chunk_text
+                            try:
+                                parsed = json.loads(buffer)
+                               
+                                yield {
+                                "event": "message",
+                                "data": json.dumps({
+                                    "content": parsed.get("content", ""),
+                                    "node": node_name,
+                                    "type": "feedback_answer"
+                                    })
+                                    }
+                                buffer = ""  # reset after full parse
+                                
+                            except json.JSONDecodeError:
+                                continue
+                        else:
+                            # Normal token streaming
+                            token_data = json.dumps({
+                            "content": msg.content,
+                            "node": node_name,
+                            "type": "chunk"
+                             })
+                            yield {"event": "token", "data": token_data}
                     elif type(msg).__name__ in ['AIMessage']:
-                        node_name = metadata.get('langgraph_node', 'unknown')
                         yield {"event": "message", "data": json.dumps({
                             "content": msg.content,
                             "node": node_name,

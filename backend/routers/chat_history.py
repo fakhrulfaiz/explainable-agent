@@ -44,9 +44,9 @@ async def get_all_chat_threads(
 ):
   
     try:
-        threads = await chat_service.get_all_threads(limit=limit, skip=skip)
+        threads = await chat_service.get_all_threads_summary(limit=limit, skip=skip)
+        print("/last message", threads[0].last_message)
         total = await chat_service.get_thread_count()
-        
         return ChatListResponse(
             success=True,
             data=threads,

@@ -369,7 +369,7 @@ Guidelines:
         
         steps = state.get("steps", [])
         step_counter = state.get("step_counter", 0)
-        
+    
         # Execute tools
         tool_node = ToolNode(tools=self.tools)
         result = tool_node.invoke({"messages": messages})
@@ -397,7 +397,9 @@ Guidelines:
                 }
                 
                 steps.append(step_info)
-        
+
+                import time
+                time.sleep(2)  # 2 second delay
         return {
             "messages": result["messages"],
             "steps": steps,
@@ -407,32 +409,58 @@ Guidelines:
         }
     
     def explainer_node(self, state: ExplainableAgentState):
-        """Explain the last step taken"""
+        """Explain the last step taken and ensure all steps have required fields"""
         steps = state.get("steps", [])
+        updated_steps = []
         
-        if steps:
-            # Get the last step
-            last_step = steps[-1]
+        for i, step in enumerate(steps):
+            # Create a copy to avoid mutating original state
+            step_copy = step.copy()
             
-            # Get explanation from explainer
-            explanation = self.explainer.explain_step(last_step)
+            # Check if step is missing required fields
+            missing_fields = [field for field in ["decision", "reasoning", "confidence", "why_chosen"] 
+                             if field not in step_copy]
             
-            # Update the step with explanation (now using Pydantic model)
-            last_step.update({
-                "decision": explanation.decision,
-                "reasoning": explanation.reasoning,
-                "why_chosen": explanation.why_chosen,
-                "confidence": explanation.confidence
-            })
+            if missing_fields:
+                try:
+                    if i == len(steps) - 1:
+                        # Get detailed explanation for the last step
+                        explanation = self.explainer.explain_step(step_copy)
+                        step_copy.update({
+                            "decision": explanation.decision,
+                            "reasoning": explanation.reasoning,
+                            "why_chosen": explanation.why_chosen,
+                            "confidence": explanation.confidence
+                        })
+                    else:
+                        # For previous steps, try to generate better defaults based on available data
+                        tool_type = step_copy.get('type', 'unknown')
+                        tool_result = step_copy.get('result', 'No result available')
+                        
+                        step_copy.update({
+                            "decision": f"Execute {tool_type} tool",
+                            "reasoning": f"Used {tool_type} to process the query. Result: {str(tool_result)[:100]}...",
+                            "confidence": 0.7,  # Lower confidence for auto-generated explanations
+                            "why_chosen": f"Selected {tool_type} as the appropriate tool for this step"
+                        })
+                except Exception as e:
+                    # Fallback if explanation generation fails
+                    step_copy.update({
+                        "decision": f"Step {i+1} execution",
+                        "reasoning": f"Error generating explanation: {str(e)}",
+                        "confidence": 0.5,
+                        "why_chosen": "Unable to determine reasoning"
+                    })
+            
+            updated_steps.append(step_copy)
         
         return {
             "messages": state["messages"],
-            "steps": steps,
+            "steps": updated_steps,
             "step_counter": state.get("step_counter", 0),
             "query": state.get("query", ""),
             "plan": state.get("plan", "")
         }
-
     def get_interrupt_state(self, config=None):
          
         if config is None:

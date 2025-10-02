@@ -6,6 +6,7 @@ from bson import ObjectId
 
 class ChatMessage(BaseModel):
     """Individual chat message"""
+    thread_id: Optional[str] = Field(None, description="Thread ID for this message")
     sender: Literal["user", "assistant"] = Field(..., description="Message sender")
     content: str = Field(..., description="Message content")
     timestamp: datetime = Field(default_factory=datetime.now, description="Message timestamp")
@@ -22,7 +23,7 @@ class ChatMessage(BaseModel):
     has_timed_out: Optional[bool] = Field(None, description="Whether message has timed out")
     can_retry: Optional[bool] = Field(None, description="Whether message can be retried")
     retry_action: Optional[Literal["approve", "feedback", "cancel"]] = Field(None, description="Retry action type")
-    thread_id_ref: Optional[str] = Field(None, description="Thread ID reference from frontend")
+
     
     class Config:
         json_encoders = {
@@ -34,7 +35,6 @@ class ChatThread(BaseModel):
     """Chat thread/conversation"""
     thread_id: str = Field(..., description="Unique thread identifier")
     title: Optional[str] = Field(None, description="Chat thread title")
-    messages: List[ChatMessage] = Field(default_factory=list, description="Chat messages")
     created_at: datetime = Field(default_factory=datetime.now, description="Thread creation time")
     updated_at: datetime = Field(default_factory=datetime.now, description="Last update time")
     
@@ -43,15 +43,21 @@ class ChatThread(BaseModel):
             datetime: lambda v: v.isoformat()
         }
 
+class ChatThreadWithMessages(ChatThread):
+    """Chat thread with messages"""
+    messages: List[ChatMessage] = Field(..., description="Messages")
+
 
 class ChatThreadSummary(BaseModel):
     """Summary view of chat thread for listing"""
-    thread_id: str = Field(..., description="Unique thread identifier")
-    title: Optional[str] = Field(None, description="Chat thread title")
+    # Chat thread properties at top level
+    thread_id: str = Field(..., description="Thread ID")
+    title: str = Field(..., description="Thread title")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
     last_message: Optional[str] = Field(None, description="Last message preview")
-    message_count: int = Field(0, description="Total message count")
-    created_at: datetime = Field(..., description="Thread creation time")
-    updated_at: datetime = Field(..., description="Last update time")
+    message_count: int = Field(0, description="Total message count for thread")
+    
     
     class Config:
         json_encoders = {
@@ -83,14 +89,13 @@ class AddMessageRequest(BaseModel):
     has_timed_out: Optional[bool] = Field(None, description="Whether message has timed out")
     can_retry: Optional[bool] = Field(None, description="Whether message can be retried")
     retry_action: Optional[Literal["approve", "feedback", "cancel"]] = Field(None, description="Retry action type")
-    thread_id_ref: Optional[str] = Field(None, description="Thread ID reference from frontend")
     metadata: Optional[dict] = Field(None, description="Additional metadata")
 
 
 class ChatHistoryResponse(BaseModel):
     """Response containing chat thread data"""
     success: bool = Field(..., description="Request success status")
-    data: Optional[ChatThread] = Field(None, description="Chat thread data")
+    data: Optional[ChatThreadWithMessages] = Field(None, description="Chat thread data with messages")
     message: str = Field(..., description="Response message")
 
 

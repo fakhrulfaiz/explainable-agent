@@ -41,7 +41,6 @@ export interface AddMessageRequest {
   can_retry?: boolean;
   retry_action?: 'approve' | 'feedback' | 'cancel';
   thread_id_ref?: string;
-  metadata?: { [key: string]: any };
 }
 
 export interface ChatHistoryResponse {

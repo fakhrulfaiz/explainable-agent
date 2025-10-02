@@ -288,8 +288,8 @@ const ChatThreadSelector: React.FC<ChatThreadSelectorProps> = ({
             )}
           </div>
 
-          {/* Refresh Button */}
-          <div className="border-t border-gray-200 p-2">
+          {/* Refresh Button - Always visible at bottom */}
+          <div className="border-t border-gray-200 p-2 bg-white sticky bottom-0">
             <button
               onClick={loadThreads}
               className="w-full text-xs text-gray-500 hover:text-gray-700 py-1"

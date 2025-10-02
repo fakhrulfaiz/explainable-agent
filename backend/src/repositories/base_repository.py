@@ -68,6 +68,16 @@ class BaseRepository(ABC, Generic[T]):
             logger.error(f"Error deleting document {id_field}={entity_id}: {e}")
             raise Exception(f"Failed to delete document: {e}")
     
+    async def delete_many(self, filter_criteria: Dict[str, Any]) -> int:
+        """Delete multiple documents matching the filter criteria"""
+        try:
+            result = await self.collection.delete_many(filter_criteria)
+            logger.info(f"Deleted {result.deleted_count} documents")
+            return result.deleted_count
+        except PyMongoError as e:
+            logger.error(f"Error deleting documents: {e}")
+            raise Exception(f"Failed to delete documents: {e}")
+    
     async def find_many(self, filter_criteria: Dict[str, Any] = None, 
                        limit: int = None, skip: int = None, 
                        sort_criteria: List[tuple] = None) -> List[T]:

@@ -8,6 +8,7 @@ export interface Message {
   disapproved?: boolean;
   isError?: boolean;
   isFeedback?: boolean;
+  isStreaming?: boolean;
   hasTimedOut?: boolean;
   canRetry?: boolean;
   retryAction?: 'approve' | 'feedback' | 'cancel';
@@ -31,7 +32,7 @@ export interface HandlerResponse {
   streamingHandler?: (
     streamingMessageId: number, 
     updateMessageCallback: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error') => void
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
   ) => Promise<void>;
 }
 

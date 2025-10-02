@@ -37,21 +37,7 @@ class ChatThreadRepository(BaseRepository[ChatThread]):
     
     async def create_thread(self, thread: ChatThread) -> bool:
         return await self.create(thread)
-    
-    async def add_message_to_thread(self, thread_id: str, message: ChatMessage) -> bool:
-        try:
-            result = await self.collection.update_one(
-                {"thread_id": thread_id},
-                {
-                    "$push": {"messages": message.dict()},
-                    "$set": {"updated_at": datetime.now()}
-                }
-            )
-            return result.modified_count > 0
-        except PyMongoError as e:
-            logger.error(f"Error adding message to thread {thread_id}: {e}")
-            raise Exception(f"Failed to add message: {e}")
-    
+     
     async def update_thread_title(self, thread_id: str, title: str) -> bool:
         return await self.update_by_id(
             thread_id, 
@@ -62,7 +48,7 @@ class ChatThreadRepository(BaseRepository[ChatThread]):
     async def delete_thread(self, thread_id: str) -> bool:
         return await self.delete_by_id(thread_id, "thread_id")
     
-    async def get_thread_summaries(self, limit: int = 50, skip: int = 0) -> List[ChatThreadSummary]:
+    async def get_threads(self, limit: int = 50, skip: int = 0) -> List[ChatThread]:
     
         try:
             cursor = self.collection.find(
@@ -72,35 +58,15 @@ class ChatThreadRepository(BaseRepository[ChatThread]):
                     "title": 1,
                     "created_at": 1,
                     "updated_at": 1,
-                    "messages": {"$slice": -1}  # Get only the last message
                 }
             ).sort("updated_at", -1).skip(skip).limit(limit)
             
             summaries = []
             async for thread_data in cursor:
-                # Extract last message preview
-                last_message = None
-                message_count = 0
-                
-                if "messages" in thread_data and thread_data["messages"]:
-                    last_msg = thread_data["messages"][-1]
-                    last_message = last_msg.get("content", "")[:100]  # First 100 chars
-                    if len(last_msg.get("content", "")) > 100:
-                        last_message += "..."
-                
-                # Get total message count
-                count_result = await self.collection.find_one(
-                    {"thread_id": thread_data["thread_id"]},
-                    {"messages": 1}
-                )
-                if count_result and "messages" in count_result:
-                    message_count = len(count_result["messages"])
-                
-                summary = ChatThreadSummary(
+               
+                summary = ChatThread(
                     thread_id=thread_data["thread_id"],
                     title=thread_data.get("title", "Untitled Chat"),
-                    last_message=last_message,
-                    message_count=message_count,
                     created_at=thread_data["created_at"],
                     updated_at=thread_data["updated_at"]
                 )

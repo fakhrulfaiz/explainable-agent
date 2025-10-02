@@ -7,6 +7,47 @@ import FeedbackForm from './FeedbackForm';
 import LoadingIndicator from './LoadingIndicator';
 import '../styles/scrollbar.css';
 
+// Ephemeral tool indicator component - shows step history
+const EphemeralToolIndicator: React.FC<{ 
+  steps: Array<{ 
+    name: string; 
+    id: string; 
+    startTime: number; 
+    endTime?: number;
+    status: 'calling' | 'completed';
+  }> 
+}> = ({ steps }) => {
+  return (
+    <div className="bg-blue-50 border-l-4 border-blue-200 p-3 mb-2 rounded-r-lg">
+      <div className="space-y-2">
+        {steps.map((step, index) => (
+          <div key={step.id} className="flex items-center gap-2 text-sm">
+            {step.status === 'completed' ? (
+              <div className="w-3 h-3 bg-green-500 rounded-full flex-shrink-0 flex items-center justify-center">
+                <span className="text-white text-xs">✓</span>
+              </div>
+            ) : (
+              <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            )}
+            <span className={`font-medium ${step.status === 'completed' ? 'text-green-700' : 'text-blue-700'}`}>
+              {step.status === 'completed' 
+                ? `Step ${index + 1}: ${step.name || 'Unknown Tool'} (completed)` 
+                : `Step ${index + 1}: ${step.name || 'Unknown Tool'}...`
+              }
+            </span>
+            <span className={`text-xs ${step.status === 'completed' ? 'text-green-500' : 'text-blue-500'}`}>
+              {step.status === 'completed' 
+                ? `${Math.max(1, Math.floor((step.endTime! - step.startTime) / 1000))}s`
+                : `${Math.floor((Date.now() - step.startTime) / 1000)}s`
+              }
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const ChatComponent: React.FC<ChatComponentProps> = ({ 
   onSendMessage, 
   onApprove, 
@@ -32,6 +73,18 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   // Streaming UI state
   const [streamingActive, setStreamingActive] = useState<boolean>(false);
+  
+  // Tool call state for ephemeral indicators - now tracks step history
+  const [toolStepHistory, setToolStepHistory] = useState<{
+    messageId: number;
+    steps: Array<{ 
+      name: string; 
+      id: string; 
+      startTime: number; 
+      endTime?: number;
+      status: 'calling' | 'completed';
+    }>;
+  } | null>(null);
   
   // Use shared state from context
   const isLoading = state.isLoading;
@@ -173,35 +226,29 @@ const appendToMessageContent = useCallback(
         setStreamingActive(true);
 
         try {
-          await response.streamingHandler(streamingMsgId, appendToMessageContent, (status) => {
+          await response.streamingHandler(streamingMsgId, appendToMessageContent, (status, eventData) => {
             if (!status) return;
-            console.log('ChatComponent: status via streamingHandler ->', status);
-            if (status === 'user_feedback') {
+            console.log('ChatComponent: status via streamingHandler ->', status);            
+            // Clear all tool indicators when streaming finishes
+            if (status === 'finished' || status === 'user_feedback') {
+              setToolStepHistory(null);
+              
               setMessages(prev => prev.map(m => 
                 m.id === streamingMsgId
-                  ? { ...m, isStreaming: false, needsApproval: true }
+                  ? { 
+                      ...m, 
+                      isStreaming: status !== 'finished', 
+                      needsApproval: status === 'user_feedback' 
+                    }
                   : m
               ));
-              setPendingApproval(streamingMsgId);
-            } else if (status === 'finished') {
-              setMessages(prev => prev.map(m => 
-                m.id === streamingMsgId
-                  ? { ...m, isStreaming: false }
-                  : m
-              ));
+              
+              if (status === 'user_feedback') {
+                setPendingApproval(streamingMsgId);
+              }
             }
             
-            if (typeof onMessageCreated === 'function') {
-                console.log('onMessageCreated called from:', new Error().stack);
-                setMessages(prev => {
-                    const finalMsg = prev.find(m => m.id === streamingMsgId);
-                    if (finalMsg) {
-                    console.log('Calling onMessageCreated for message:', streamingMsgId);
-                    setTimeout(() => onMessageCreated(finalMsg), 0);
-                  }
-                  return prev;
-                });
-            }
+            
           });               
         } catch (streamErr) {
           setMessages(prev => prev.map(m => 
@@ -285,22 +332,61 @@ const appendToMessageContent = useCallback(
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
             try {
-              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status) => {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData) => {
                 if (!status) return;
-                if (status === 'user_feedback') {
-                  setMessages(prev => prev.map(m => 
-                    m.id === streamingMsgId ? { ...m, isStreaming: false, needsApproval: true } : m
-                  ));
-                  setPendingApproval(streamingMsgId);
-                } else if (status === 'finished') {
-                  setMessages(prev => prev.map(m => m.id === streamingMsgId ? { ...m, isStreaming: false } : m));
-                }
-                if (typeof onMessageCreated === 'function') {
-                  setMessages(prev => {
-                    const finalMsg = prev.find(m => m.id === streamingMsgId);
-                    if (finalMsg) setTimeout(() => onMessageCreated(finalMsg), 0);
-                    return prev;
+                
+                // Handle tool call start - show temporary indicator
+                if (status === 'tool_call' && eventData) {
+                  const toolData = JSON.parse(eventData);
+                  setToolStepHistory(prev => {
+                    const newStep = {
+                      name: toolData.tool_name || 'Unknown Tool',
+                      id: toolData.tool_id,
+                      startTime: Date.now(),
+                      status: 'calling' as const
+                    };
+                    return {
+                      messageId: streamingMsgId,
+                      steps: [
+                        ...(prev?.messageId === streamingMsgId ? prev.steps : []),
+                        newStep
+                      ]
+                    };
                   });
+                }
+                
+                // Handle tool result - remove the temporary indicator
+                if (status === 'tool_result' && eventData) {
+                  const resultData = JSON.parse(eventData);
+                  setToolStepHistory(prev => {
+                    if (!prev || prev.messageId !== streamingMsgId) return prev;
+                    
+                    const updatedSteps = prev.steps.map(step => 
+                      step.id === resultData.tool_call_id 
+                        ? { ...step, status: 'completed' as const, endTime: Date.now() }
+                        : step
+                    );
+                    return { ...prev, steps: updatedSteps };
+                  });
+                }
+                
+                // Clear all tool indicators when streaming finishes
+                if (status === 'finished' || status === 'user_feedback') {
+                  setToolStepHistory(null);
+                  
+                  setMessages(prev => prev.map(m => 
+                    m.id === streamingMsgId
+                      ? { 
+                          ...m, 
+                          isStreaming: status !== 'finished', 
+                          needsApproval: status === 'user_feedback' 
+                        }
+                      : m
+                  ));
+                  
+                  if (status === 'user_feedback') {
+                    setPendingApproval(streamingMsgId);
+                  }
                 }
               });
             } catch (streamErr) {
@@ -402,27 +488,63 @@ const appendToMessageContent = useCallback(
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
             try {
-              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status) => {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData) => {
                 if (!status) return;
-                if (status === 'user_feedback') {
+                
+                // Handle tool call start - show temporary indicator
+                if (status === 'tool_call' && eventData) {
+                  const toolData = JSON.parse(eventData);
+                  setToolStepHistory(prev => {
+                    const newStep = {
+                      name: toolData.tool_name || 'Unknown Tool',
+                      id: toolData.tool_id,
+                      startTime: Date.now(),
+                      status: 'calling' as const
+                    };
+                    return {
+                      messageId: streamingMsgId,
+                      steps: [
+                        ...(prev?.messageId === streamingMsgId ? prev.steps : []),
+                        newStep
+                      ]
+                    };
+                  });
+                }
+                
+                // Handle tool result - remove the temporary indicator
+                if (status === 'tool_result' && eventData) {
+                  const resultData = JSON.parse(eventData);
+                  setToolStepHistory(prev => {
+                    if (!prev || prev.messageId !== streamingMsgId) return prev;
+                    
+                    const updatedSteps = prev.steps.map(step => 
+                      step.id === resultData.tool_call_id 
+                        ? { ...step, status: 'completed' as const, endTime: Date.now() }
+                        : step
+                    );
+                    return { ...prev, steps: updatedSteps };
+                  });
+                }
+                
+                // Clear all tool indicators when streaming finishes
+                if (status === 'finished' || status === 'user_feedback') {
+                  setToolStepHistory(null);
+                  
                   setMessages(prev => prev.map(m => 
                     m.id === streamingMsgId
-                      ? { ...m, isStreaming: false, needsApproval: true }
+                      ? { 
+                          ...m, 
+                          isStreaming: status !== 'finished', 
+                          needsApproval: status === 'user_feedback' 
+                        }
                       : m
                   ));
-                  setPendingApproval(streamingMsgId);
-                } else if (status === 'finished') {
-                  setMessages(prev => prev.map(m => 
-                    m.id === streamingMsgId
-                      ? { ...m, isStreaming: false }
-                      : m
-                  ));
+                  
+                  if (status === 'user_feedback') {
+                    setPendingApproval(streamingMsgId);
+                  }
                 }
               });
-              if (typeof onMessageCreated === 'function') {
-                const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
-                if (finalMsg) onMessageCreated(finalMsg);
-              }
             } catch (streamErr) {
               setMessages(prev => prev.map(m => 
                 m.id === streamingMsgId
@@ -545,22 +667,63 @@ const appendToMessageContent = useCallback(
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
             try {
-              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status) => {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData) => {
                 if (!status) return;
-                if (status === 'user_feedback') {
-                  setMessages(prev => prev.map(m => 
-                    m.id === streamingMsgId
-                      ? { ...m, isStreaming: false, needsApproval: true }
-                      : m
-                  ));
-                  setPendingApproval(streamingMsgId);
-                } else if (status === 'finished') {
-                  setMessages(prev => prev.map(m => 
-                    m.id === streamingMsgId
-                      ? { ...m, isStreaming: false }
-                      : m
-                  ));
+                
+                // Handle tool call start - show temporary indicator
+                if (status === 'tool_call' && eventData) {
+                  const toolData = JSON.parse(eventData);
+                  setToolStepHistory(prev => {
+                    const newStep = {
+                      name: toolData.tool_name || 'Unknown Tool',
+                      id: toolData.tool_id,
+                      startTime: Date.now(),
+                      status: 'calling' as const
+                    };
+                    return {
+                      messageId: streamingMsgId,
+                      steps: [
+                        ...(prev?.messageId === streamingMsgId ? prev.steps : []),
+                        newStep
+                      ]
+                    };
+                  });
                 }
+                
+                // Handle tool result - remove the temporary indicator
+                if (status === 'tool_result' && eventData) {
+                  const resultData = JSON.parse(eventData);
+                  setToolStepHistory(prev => {
+                    if (!prev || prev.messageId !== streamingMsgId) return prev;
+                    
+                    const updatedSteps = prev.steps.map(step => 
+                      step.id === resultData.tool_call_id 
+                        ? { ...step, status: 'completed' as const, endTime: Date.now() }
+                        : step
+                    );
+                    return { ...prev, steps: updatedSteps };
+                  });
+                }
+                
+                // Clear all tool indicators when streaming finishes
+                if (status === 'finished' || status === 'user_feedback') {
+                  setToolStepHistory(null);
+                  
+                  setMessages(prev => prev.map(m => 
+                    m.id === streamingMsgId
+                      ? { 
+                          ...m, 
+                          isStreaming: status !== 'finished', 
+                          needsApproval: status === 'user_feedback' 
+                        }
+                      : m
+                  ));
+                  
+                  if (status === 'user_feedback') {
+                    setPendingApproval(streamingMsgId);
+                  }
+                }
+                
                 if (typeof onMessageCreated === 'function') {
                   const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
                   if (finalMsg) onMessageCreated(finalMsg);
@@ -852,19 +1015,32 @@ const appendToMessageContent = useCallback(
           </div>
         ) : (
           messages.map((message) => (
-            <Message
-              key={message.id}
-              message={message}
-              onRetry={handleRetry}
-            />
+            <React.Fragment key={message.id}>
+              <Message
+                message={message}
+                onRetry={handleRetry}
+              />
+              
+              {/* Show ephemeral tool indicators only for the streaming message */}
+              {(() => {
+                const shouldShow = message.isStreaming && 
+                                 toolStepHistory?.messageId === message.id && 
+                                 toolStepHistory.steps.length > 0;
+                return shouldShow && (
+                  <EphemeralToolIndicator steps={toolStepHistory.steps} />
+                );
+              })()}
+            </React.Fragment>
           ))
         )}
 
     
         {/* Loading indicator */}
-        {isLoading && <LoadingIndicator />}
-
-        <div ref={messagesEndRef} />
+        {isLoading && (
+          <LoadingIndicator 
+            activeTools={toolStepHistory?.steps.filter(s => s.status === 'calling').map(s => s.name)} 
+          />
+        )}        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
@@ -935,3 +1111,5 @@ const appendToMessageContent = useCallback(
 };
 
 export default ChatComponent;
+
+

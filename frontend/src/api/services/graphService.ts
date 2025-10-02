@@ -179,6 +179,32 @@ export class GraphService {
       }
     });
     
+    // Handle tool call events
+    eventSource.addEventListener('tool_call', (event) => {
+      try {
+        console.log("🔧 FRONTEND: Received tool_call event:", event.data);
+        const data = JSON.parse(event.data);
+        console.log("🔧 FRONTEND: Parsed tool_call data:", data);
+        onMessageCallback({ status: 'tool_call', eventData: event.data });
+      } catch (error) {
+        console.error("Error parsing tool_call event:", error, "Raw data:", event.data);
+        onErrorCallback(error as Error);
+      }
+    });
+    
+    // Handle tool result events
+    eventSource.addEventListener('tool_result', (event) => {
+      try {
+        console.log("✅ FRONTEND: Received tool_result event:", event.data);
+        const data = JSON.parse(event.data);
+        console.log("✅ FRONTEND: Parsed tool_result data:", data);
+        onMessageCallback({ status: 'tool_result', eventData: event.data });
+      } catch (error) {
+        console.error("Error parsing tool_result event:", error, "Raw data:", event.data);
+        onErrorCallback(error as Error);
+      }
+    });
+    
     // Handle errors
     eventSource.onerror = (error) => {
       console.log("SSE connection state change - readyState:", eventSource.readyState);

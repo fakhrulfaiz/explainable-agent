@@ -131,7 +131,7 @@ const ChatWithApproval: React.FC = () => {
         can_retry: msg.canRetry || undefined,
         retry_action: msg.retryAction || undefined,
         thread_id_ref: msg.threadId || undefined,
-        metadata: msg.metadata || undefined
+
       });
     } catch (e) {
       console.error('Failed to persist message:', e);
@@ -176,7 +176,7 @@ const ChatWithApproval: React.FC = () => {
     streamingMessageId: number,
     chatThreadId: string,
     updateMessageCallback: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error') => void
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
   ): Promise<void> => {
     try {
       const startResponse = await GraphService.startStreamingGraph({
@@ -196,7 +196,7 @@ const ChatWithApproval: React.FC = () => {
             setExecutionStatus(data.status);
             console.log('setExecutionStatus called with:', data.status);
             if (onStatus) {
-              onStatus(data.status);
+              onStatus(data.status, data.eventData);
             }
           }
         },
@@ -224,7 +224,7 @@ const ChatWithApproval: React.FC = () => {
     humanComment?: string,
     streamingMessageId?: number,
     updateMessageCallback?: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error') => void
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
   ): Promise<void> => {
     try {
       await GraphService.resumeStreamingGraph({
@@ -244,7 +244,7 @@ const ChatWithApproval: React.FC = () => {
             setExecutionStatus(data.status);
             console.log('setExecutionStatus called with:', data.status);
             if (onStatus) {
-              onStatus(data.status);
+              onStatus(data.status, data.eventData);
             }
           }
         },
@@ -347,7 +347,7 @@ const ChatWithApproval: React.FC = () => {
           streamingHandler: async (
             streamingMessageId: number,
             updateMessageCallback: (id: number, content: string) => void,
-            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error') => void
+            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
           ) => {
             await startStreamingForMessage(message, streamingMessageId, chatThreadId, updateMessageCallback, onStatus);
           }
@@ -431,7 +431,7 @@ const ChatWithApproval: React.FC = () => {
           streamingHandler: async (
             streamingMessageId: number,
             updateMessageCallback: (id: number, content: string) => void,
-            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error') => void
+            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
           ) => {
             await resumeStreamingForMessage(threadId, 'approved', undefined, streamingMessageId, updateMessageCallback, onStatus);
           }
@@ -527,7 +527,7 @@ const ChatWithApproval: React.FC = () => {
           streamingHandler: async (
             streamingMessageId: number,
             updateMessageCallback: (id: number, content: string) => void,
-            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error') => void
+            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
           ) => {
             await resumeStreamingForMessage(threadId, 'feedback', content, streamingMessageId, updateMessageCallback, onStatus);
           }

@@ -1,6 +1,10 @@
 import React from 'react';
 
-const LoadingIndicator: React.FC = () => {
+interface LoadingIndicatorProps {
+  activeTools?: string[];
+}
+
+const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({ activeTools }) => {
   return (
     <div className="flex justify-start">
       <div className="bg-gray-100 px-4 py-3 rounded-lg">
@@ -16,6 +20,16 @@ const LoadingIndicator: React.FC = () => {
           ></div>
           <span className="text-gray-600 text-sm ml-2">Generating...</span>
         </div>
+        {activeTools && activeTools.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {activeTools.map((tool, i) => (
+              <div key={i} className="text-xs text-blue-600 flex items-center gap-1">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                Using {tool}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
