@@ -9,31 +9,39 @@ from src.services.checkpoint_service import CheckpointService
 from src.repositories.messages_repository import MessagesRepository
 
 # Repository Dependencies
-def get_chat_thread_repository(db: Database = Depends(get_mongodb)) -> ChatThreadRepository:
+async def get_chat_thread_repository(db: Database = Depends(get_mongodb)) -> ChatThreadRepository:
     """Dependency to get ChatThreadRepository"""
-    return ChatThreadRepository(db)
+    repo = ChatThreadRepository(db)
+    await repo.ensure_indexes()
+    return repo
 
-def get_checkpoint_write_repository(db: Database = Depends(get_mongodb)) -> CheckpointWriteRepository:
+async def get_checkpoint_write_repository(db: Database = Depends(get_mongodb)) -> CheckpointWriteRepository:
     """Dependency to get CheckpointWriteRepository"""
-    return CheckpointWriteRepository(db)
+    repo = CheckpointWriteRepository(db)
+    await repo.ensure_indexes()
+    return repo
 
-def get_checkpoint_repository(db: Database = Depends(get_mongodb)) -> CheckpointRepository:
+async def get_checkpoint_repository(db: Database = Depends(get_mongodb)) -> CheckpointRepository:
     """Dependency to get CheckpointRepository"""
-    return CheckpointRepository(db)
+    repo = CheckpointRepository(db)
+    await repo.ensure_indexes()
+    return repo
 
-def get_messages_repository(db: Database = Depends(get_mongodb)) -> MessagesRepository:
+async def get_messages_repository(db: Database = Depends(get_mongodb)) -> MessagesRepository:
     """Dependency to get MessagesRepository"""
-    return MessagesRepository(db)
+    repo = MessagesRepository(db)
+    await repo.ensure_indexes()
+    return repo
 
 
 # Service Dependencies (using repositories)
-def get_checkpoint_service(
+async def get_checkpoint_service(
     checkpoint_write_repo: CheckpointWriteRepository = Depends(get_checkpoint_write_repository),
     checkpoint_repo: CheckpointRepository = Depends(get_checkpoint_repository)
 ):
     return CheckpointService(checkpoint_write_repo, checkpoint_repo)
 
-def get_chat_history_service(
+async def get_chat_history_service(
     chat_thread_repo: ChatThreadRepository = Depends(get_chat_thread_repository),
     checkpoint_service = Depends(get_checkpoint_service),
     messages_repo: MessagesRepository = Depends(get_messages_repository)

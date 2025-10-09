@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, TypeVar, Generic
 from pymongo.database import Database
-from pymongo.collection import Collection
 from pymongo.errors import PyMongoError
 import logging
 
@@ -13,12 +12,19 @@ class BaseRepository(ABC, Generic[T]):
     
     def __init__(self, database: Database, collection_name: str):
         self.db = database
-        self.collection: Collection = self.db[collection_name]
-        self._create_indexes()
+        # Collection is async in runtime; keep untyped to avoid mismatched stubs
+        self.collection = self.db[collection_name]
     
     @abstractmethod
-    def _create_indexes(self) -> None:
+    async def _create_indexes(self) -> None:
         pass
+
+    async def ensure_indexes(self) -> None:
+        try:
+            await self._create_indexes()
+        except Exception as e:
+            # Log but do not crash app startup if indexes fail
+            logger.warning(f"Index creation failed for collection: {e}")
     
     @abstractmethod
     def _to_entity(self, data: Dict[str, Any]) -> T:

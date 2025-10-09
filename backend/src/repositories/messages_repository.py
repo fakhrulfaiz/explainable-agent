@@ -15,26 +15,17 @@ class MessagesRepository(BaseRepository[ChatMessage]):
     def __init__(self, database: Database):
         super().__init__(database, "messages")
     
-    def _create_indexes(self) -> None:
+    async def _create_indexes(self) -> None:
         try:
-            # message_id should be unique, thread_id should NOT be unique
-            self.collection.create_index("message_id", unique=True)
-            
-            # thread_id should NOT be unique (multiple messages per thread)
-            self.collection.create_index("thread_id")  # Remove unique=True
-            
-            # Add compound index for efficient thread queries
-            self.collection.create_index([("thread_id", 1), ("timestamp", 1)])
-            self.collection.create_index([("thread_id", 1), ("timestamp", -1)])
-            
-            # Keep existing indexes
-            self.collection.create_index([("updated_at", -1)])
-            self.collection.create_index([("created_at", -1)])
-            
-            # Add useful indexes for use case
-            self.collection.create_index([("sender", 1), ("timestamp", -1)])
-            self.collection.create_index("message_type")
-                    
+            # Create unique index on message_id - all messages must have a unique message_id
+            await self.collection.create_index("message_id", unique=True)
+            await self.collection.create_index("thread_id")
+            await self.collection.create_index([("thread_id", 1), ("timestamp", 1)])
+            await self.collection.create_index([("thread_id", 1), ("timestamp", -1)])
+            await self.collection.create_index([("updated_at", -1)])
+            await self.collection.create_index([("created_at", -1)])
+            await self.collection.create_index([("sender", 1), ("timestamp", -1)])
+            await self.collection.create_index("message_type")
         except PyMongoError as e:
             logger.warning(f"Could not create messages indexes: {e}")
     

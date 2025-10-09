@@ -26,9 +26,11 @@ async def create_chat_thread(
 ):
     try:
         thread = await chat_service.create_thread(request)
+        # Convert ChatThread to ChatThreadWithMessages by getting the full thread data
+        thread_with_messages = await chat_service.get_thread(thread.thread_id)
         return ChatHistoryResponse(
             success=True,
-            data=thread,
+            data=thread_with_messages,
             message="Chat thread created successfully"
         )
     except Exception as e:
@@ -45,7 +47,8 @@ async def get_all_chat_threads(
   
     try:
         threads = await chat_service.get_all_threads_summary(limit=limit, skip=skip)
-        print("/last message", threads[0].last_message)
+        if threads:
+            print("/last message", threads[0].last_message)
         total = await chat_service.get_thread_count()
         return ChatListResponse(
             success=True,

@@ -14,15 +14,11 @@ class ChatThreadRepository(BaseRepository[ChatThread]):
     def __init__(self, database: Database):
         super().__init__(database, "chat_threads")
     
-    def _create_indexes(self) -> None:
-   
+    async def _create_indexes(self) -> None:
         try:
-            # Index on thread_id for fast lookups
-            self.collection.create_index("thread_id", unique=True)
-            # Index on updated_at for sorting by recency
-            self.collection.create_index([("updated_at", -1)])
-            # Index on created_at for sorting by creation time
-            self.collection.create_index([("created_at", -1)])
+            await self.collection.create_index("thread_id", unique=True)
+            await self.collection.create_index([("updated_at", -1)])
+            await self.collection.create_index([("created_at", -1)])
         except PyMongoError as e:
             logger.warning(f"Could not create chat thread indexes: {e}")
     

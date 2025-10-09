@@ -49,12 +49,11 @@ class CheckpointWriteRepository(BaseRepository[CheckpointWriteEntry]):
     def __init__(self, database: Database):
         super().__init__(database, "checkpointing_db.checkpoint_writes")
     
-    def _create_indexes(self) -> None:
-   
+    async def _create_indexes(self) -> None:
         try:
-            self.collection.create_index("checkpoint_id")
-            self.collection.create_index("thread_id")
-            self.collection.create_index([("created_at", -1)])
+            await self.collection.create_index("checkpoint_id")
+            await self.collection.create_index("thread_id")
+            await self.collection.create_index([("created_at", -1)])
         except PyMongoError as e:
             logger.warning(f"Could not create checkpoint write indexes: {e}")
     
@@ -120,12 +119,11 @@ class CheckpointRepository(BaseRepository[CheckpointEntry]):
     def __init__(self, database: Database):
         super().__init__(database, "checkpointing_db.checkpoints")
     
-    def _create_indexes(self) -> None:
-   
+    async def _create_indexes(self) -> None:
         try:
-            self.collection.create_index("checkpoint_id", unique=True)
-            self.collection.create_index("thread_id")
-            self.collection.create_index([("created_at", -1)])
+            await self.collection.create_index("checkpoint_id", unique=True)
+            await self.collection.create_index("thread_id")
+            await self.collection.create_index([("created_at", -1)])
         except PyMongoError as e:
             logger.warning(f"Could not create checkpoint indexes: {e}")
     

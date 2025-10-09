@@ -46,11 +46,13 @@ class ChatHistoryService:
             
             # Add initial message if provided
             if request.initial_message:
+                import time
                 initial_msg = ChatMessage(
                     sender="user",
                     content=request.initial_message,
                     timestamp=datetime.now(),
-                    thread_id=thread.thread_id
+                    thread_id=thread.thread_id,
+                    message_id=int(time.time() * 1000000)  # Generate unique message_id
                 )
                 await self.messages_repo.add_message(initial_msg)
             
@@ -96,15 +98,22 @@ class ChatHistoryService:
     
     
     async def add_message(self, request: AddMessageRequest) -> bool:
-
+        
         try:
+            # Ensure message_id is provided - generate one if not provided
+            message_id = request.message_id
+            if message_id is None:
+                import time
+                message_id = int(time.time() * 1000000)  # Microsecond precision timestamp
+                logger.warning(f"message_id was None, generated: {message_id}")
+            
             message = ChatMessage(
                 sender=request.sender,
                 content=request.content,
                 timestamp=datetime.now(),
                 message_type=request.message_type,
                 checkpoint_id=request.checkpoint_id,
-                message_id=request.message_id,
+                message_id=message_id,
                 needs_approval=request.needs_approval,
                 approved=request.approved,
                 disapproved=request.disapproved,
