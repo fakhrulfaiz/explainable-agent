@@ -239,7 +239,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Separator className="bg-gray-200" />
 
           {/* Threads List */}
-          <ScrollArea className="flex-1 px-2 max-w-full overflow-hidden">
+          <ScrollArea className="flex-1 px-2 max-w-full overflow-visible">
             {loading ? (
               <div className="p-4 text-center text-gray-500 text-sm">
                 Loading threads...
@@ -264,7 +264,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {filteredThreads.map((thread) => (
                   <div
                     key={thread.thread_id}
-                    className={`relative group rounded-lg transition-colors overflow-hidden ${
+                    className={`relative group rounded-lg transition-colors ${
                       selectedThreadId === thread.thread_id 
                         ? 'bg-gray-100' 
                         : 'hover:bg-gray-50'
@@ -331,7 +331,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                     {/* Actions Menu */}
                     {showActions === thread.thread_id && (
-                      <div className="absolute right-3 top-12 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-36">
+                      <div className="absolute right-3 top-12 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] min-w-36 overflow-visible">
                         <button
                           onClick={(e) => handleEditTitle(thread.thread_id, thread.title || '', e)}
                           className="w-full flex items-center gap-2 p-2 hover:bg-gray-50 text-left text-sm text-gray-700"
