@@ -27,18 +27,19 @@ export interface HandlerResponse {
   message: string;
   needsApproval?: boolean;
   explorerData?: any;
+  response_type?: 'answer' | 'replan' | 'cancel';  // Type of response from backend
   // New streaming properties
   isStreaming?: boolean;
   streamingHandler?: (
     streamingMessageId: number, 
     updateMessageCallback: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void
   ) => Promise<void>;
 }
 
 
 export interface ChatComponentProps {
-  onSendMessage: (message: string, messageHistory: Message[]) => Promise<HandlerResponse>;
+  onSendMessage: (message: string, messageHistory: Message[], options?: { usePlanning?: boolean; attachedFiles?: File[] }) => Promise<HandlerResponse>;
   onApprove?: (content: string, message: Message) => Promise<HandlerResponse | void> | HandlerResponse | void;
   onFeedback?: (content: string, message: Message) => Promise<HandlerResponse | void> | HandlerResponse | void;
   onCancel?: (content: string, message: Message) => Promise<string> | string;
@@ -68,6 +69,8 @@ export interface FeedbackFormProps {
 export interface StartRequest {
   human_request: string;
   thread_id?: string; // Optional thread ID for existing conversations
+  use_planning?: boolean; // Whether to use planning in agent execution
+  agent_type?: string; // Type of agent to use
 }
 
 export interface ResumeRequest {
@@ -107,6 +110,7 @@ export interface GraphResponse {
   final_result?: FinalResult;
   total_time?: number;
   overall_confidence?: number;
+  response_type?: 'answer' | 'replan' | 'cancel';  // Type of response from planner
 }
 
 export interface GraphStatus {

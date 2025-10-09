@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Send, ThumbsUp, ThumbsDown, RotateCcw } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, RotateCcw } from 'lucide-react';
 import { Message as MessageType, ChatComponentProps, HandlerResponse } from '../types/chat';
 import { useUIState } from '../contexts/UIStateContext';
 import Message from './Message';
 import FeedbackForm from './FeedbackForm';
 import LoadingIndicator from './LoadingIndicator';
+import EnhancedInput from './EnhancedInput';
 import '../styles/scrollbar.css';
 
 // Ephemeral tool indicator component - shows step history
@@ -74,6 +75,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   // Streaming UI state
   const [streamingActive, setStreamingActive] = useState<boolean>(false);
   
+  // Enhanced input state
+  const [usePlanning, setUsePlanning] = useState<boolean>(true);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  
   // Tool call state for ephemeral indicators - now tracks step history
   const [toolStepHistory, setToolStepHistory] = useState<{
     messageId: number;
@@ -110,10 +115,16 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     messagesRef.current = messages;
   }, [messages]);
 
-  // Observe execution status changes for debugging
+
+  // Auto-set pendingApproval when messages change and there's no current pending approval
   useEffect(() => {
-    console.log('ChatComponent: executionStatus changed ->', state.executionStatus);
-  }, [state.executionStatus]);
+    if (!pendingApproval && messages.length > 0) {
+      const messageNeedingApproval = messages.find(m => m.needsApproval);
+      if (messageNeedingApproval) {
+        setPendingApproval(messageNeedingApproval.id);
+      }
+    }
+  }, [messages, pendingApproval]);
 
 
   // Memoize initialMessages to prevent unnecessary re-renders
@@ -138,7 +149,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       content: response.message,
       timestamp: new Date(),
       messageType: 'explorer',
-      checkpointId: response.explorerData.checkpoint_id, // ✅ FIXED: Use actual checkpoint_id
+      checkpointId: response.explorerData.checkpoint_id, 
       metadata: { explorerData: response.explorerData },
       threadId: contextThreadId || currentThreadId || undefined
     };
@@ -201,7 +212,10 @@ const appendToMessageContent = useCallback(
       role: 'user',
       content: userMessage,
       timestamp: new Date(),
-      threadId: contextThreadId || currentThreadId || undefined
+      threadId: contextThreadId || currentThreadId || undefined,
+      metadata: {
+        attachedFiles: attachedFiles
+      }
     };
 
     setMessages(prev => [...prev, newUserMessage]);
@@ -210,7 +224,7 @@ const appendToMessageContent = useCallback(
   }
 
     try {
-      const response = await onSendMessage(userMessage, messages);
+      const response = await onSendMessage(userMessage, messages, { usePlanning, attachedFiles });
       if (response.isStreaming && response.streamingHandler) {
         // Prepare a streaming assistant message
         const streamingMsgId = Date.now() + 1;
@@ -226,9 +240,8 @@ const appendToMessageContent = useCallback(
         setStreamingActive(true);
 
         try {
-          await response.streamingHandler(streamingMsgId, appendToMessageContent, (status, eventData) => {
-            if (!status) return;
-            console.log('ChatComponent: status via streamingHandler ->', status);            
+          await response.streamingHandler(streamingMsgId, appendToMessageContent, (status, _eventData, responseType) => {
+            if (!status) return;            
             // Clear all tool indicators when streaming finishes
             if (status === 'finished' || status === 'user_feedback') {
               setToolStepHistory(null);
@@ -238,12 +251,12 @@ const appendToMessageContent = useCallback(
                   ? { 
                       ...m, 
                       isStreaming: status !== 'finished', 
-                      needsApproval: status === 'user_feedback' 
+                      needsApproval: status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)
                     }
                   : m
               ));
               
-              if (status === 'user_feedback') {
+              if (status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)) {
                 setPendingApproval(streamingMsgId);
               }
             }
@@ -261,7 +274,6 @@ const appendToMessageContent = useCallback(
         }
       } else {
       const messageContent = handleResponse(response);
-      console.log('ChatComponent: messageContent ->', messageContent);
       const assistantMessage: MessageType = {
         id: Date.now() + 1,
         role: 'assistant',
@@ -301,18 +313,29 @@ const appendToMessageContent = useCallback(
   };
 
   const handleApprove = async (messageId: number): Promise<void> => {
-  
     const message = messages.find(m => m.id === messageId);
+    
     if (!message) {
       return;
     }
+    
+    // Only allow approving messages that need approval
+    if (!message.needsApproval) {
+      return;
+    }
+    
     setShowFeedbackForm(false);
     setFeedbackText('');
     setPendingApproval(null);
     setExecutionStatus('running');
     setLoading(true);
     
-    
+    // Mark the message as approved immediately for UI feedback
+    setMessages(prev => prev.map(m => 
+      m.id === messageId 
+        ? { ...m, approved: true, needsApproval: false }
+        : m
+    ));
 
     try {
       // Call parent handler
@@ -332,7 +355,7 @@ const appendToMessageContent = useCallback(
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
             try {
-              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData) => {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData, responseType) => {
                 if (!status) return;
                 
                 // Handle tool call start - show temporary indicator
@@ -379,12 +402,12 @@ const appendToMessageContent = useCallback(
                       ? { 
                           ...m, 
                           isStreaming: status !== 'finished', 
-                          needsApproval: status === 'user_feedback' 
+                          needsApproval: status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)
                         }
                       : m
                   ));
                   
-                  if (status === 'user_feedback') {
+                  if (status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)) {
                     setPendingApproval(streamingMsgId);
                   }
                 }
@@ -426,12 +449,13 @@ const appendToMessageContent = useCallback(
                        (error as any)?.code === 'ECONNABORTED';
       
       if (isTimeout) {
-        // Mark the message as timed out and retryable
+        // Mark the message as timed out and retryable (revert approval)
         setMessages(prev => prev.map(m => 
           m.id === messageId 
             ? { 
                 ...m, 
-                approved: false, 
+                approved: false,
+                needsApproval: true, // Restore needsApproval since it failed
                 hasTimedOut: true, 
                 canRetry: true, 
                 retryAction: 'approve' as const,
@@ -440,6 +464,13 @@ const appendToMessageContent = useCallback(
             : m
         ));
       } else {
+        // Revert the approval status for non-timeout errors
+        setMessages(prev => prev.map(m => 
+          m.id === messageId 
+            ? { ...m, approved: false, needsApproval: true }
+            : m
+        ));
+        
         const errorMessage: MessageType = {
           id: Date.now() + 1,
           role: 'assistant',
@@ -459,16 +490,17 @@ const appendToMessageContent = useCallback(
   const handleFeedback = async (messageId: number): Promise<void> => {
     const message = messages.find(m => m.id === messageId);
     if (!message) return;
+    
+    // Only allow providing feedback for messages that need approval
+    if (!message.needsApproval) {
+      return;
+    }
 
     setShowFeedbackForm(false);
     setFeedbackText('');
 
-    // Update message to show it's cancelled
-    setMessages(prev => prev.map(m => 
-      m.id === messageId 
-        ? { ...m, disapproved: true, needsApproval: false }
-        : m
-    ));
+    // DON'T clear needsApproval yet - keep it so user can still approve after clarification
+    // It will be cleared only if a new plan is generated
 
     try {
       // Call parent handler
@@ -488,7 +520,7 @@ const appendToMessageContent = useCallback(
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
             try {
-              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData) => {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData, responseType) => {
                 if (!status) return;
                 
                 // Handle tool call start - show temporary indicator
@@ -530,19 +562,28 @@ const appendToMessageContent = useCallback(
                 if (status === 'finished' || status === 'user_feedback') {
                   setToolStepHistory(null);
                   
-                  setMessages(prev => prev.map(m => 
-                    m.id === streamingMsgId
-                      ? { 
-                          ...m, 
-                          isStreaming: status !== 'finished', 
-                          needsApproval: status === 'user_feedback' 
-                        }
-                      : m
-                  ));
+                  setMessages(prev => prev.map(m => {
+                    if (m.id === streamingMsgId) {
+                      // Update the streaming message
+                      // Only needs approval if response_type is 'replan'
+                      const needsApproval = status === 'user_feedback' && responseType === 'replan';
+                      return { 
+                        ...m, 
+                        isStreaming: status !== 'finished', 
+                        needsApproval: needsApproval
+                      };
+                    }
+                    // If new plan generated (response_type === 'replan'), clear old plan's needsApproval
+                    if (status === 'user_feedback' && responseType === 'replan' && m.id === messageId) {
+                      return { ...m, needsApproval: false };
+                    }
+                    return m;
+                  }));
                   
-                  if (status === 'user_feedback') {
+                  if (status === 'user_feedback' && responseType === 'replan') {
                     setPendingApproval(streamingMsgId);
                   }
+                  // Note: For clarifications, pendingApproval will be auto-set by useEffect
                 }
               });
             } catch (streamErr) {
@@ -560,22 +601,32 @@ const appendToMessageContent = useCallback(
             }
           } else {
           const messageContent = handleResponse(result as HandlerResponse);
-          const isNewPlan = messageContent.includes('This revised plan requires your approval');
+          const needsApproval = (result as HandlerResponse).needsApproval || false;
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
             content: messageContent,
             timestamp: new Date(),
-              needsApproval: isNewPlan
+            needsApproval: needsApproval
           };
+          
+          // Only clear old plan's needsApproval if this is a NEW plan (replan), not a clarification
+          if (needsApproval && (result as HandlerResponse).response_type === 'replan') {
+            setMessages(prev => prev.map(m => 
+              m.id === messageId 
+                ? { ...m, needsApproval: false }
+                : m
+            ));
+          }
+          
           setMessages(prev => [...prev, resultMessage]);
           if (typeof onMessageCreated === 'function') {
             const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
             if (finalMsg) onMessageCreated(finalMsg);
           }
-          if (isNewPlan) {
+          if (needsApproval) {
             setPendingApproval(resultMessage.id);
-            }
+          }
           }
         }
       }
@@ -641,12 +692,8 @@ const appendToMessageContent = useCallback(
     setFeedbackText('');
     setShowFeedbackForm(false);
 
-    // Update the original message to show it received feedback
-    setMessages(prev => prev.map(m => 
-      m.id === message.id 
-        ? { ...m, needsApproval: false }
-        : m
-    ));
+    // DON'T clear needsApproval here - it will be handled by the feedback response
+    // The original message should keep needsApproval: true until a new plan is generated
 
     try {
       // Use the feedback handler instead of sending a new message
@@ -667,7 +714,7 @@ const appendToMessageContent = useCallback(
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
             try {
-              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData) => {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, appendToMessageContent, (status, eventData, responseType) => {
                 if (!status) return;
                 
                 // Handle tool call start - show temporary indicator
@@ -709,19 +756,28 @@ const appendToMessageContent = useCallback(
                 if (status === 'finished' || status === 'user_feedback') {
                   setToolStepHistory(null);
                   
-                  setMessages(prev => prev.map(m => 
-                    m.id === streamingMsgId
-                      ? { 
-                          ...m, 
-                          isStreaming: status !== 'finished', 
-                          needsApproval: status === 'user_feedback' 
-                        }
-                      : m
-                  ));
+                  setMessages(prev => prev.map(m => {
+                    if (m.id === streamingMsgId) {
+                      // Update the streaming message
+                      // Only needs approval if response_type is 'replan'
+                      const needsApproval = status === 'user_feedback' && responseType === 'replan';
+                      return { 
+                        ...m, 
+                        isStreaming: status !== 'finished', 
+                        needsApproval: needsApproval
+                      };
+                    }
+                    // If new plan generated (response_type === 'replan'), clear old plan's needsApproval
+                    if (status === 'user_feedback' && responseType === 'replan' && m.id === message.id) {
+                      return { ...m, needsApproval: false };
+                    }
+                    return m;
+                  }));
                   
-                  if (status === 'user_feedback') {
+                  if (status === 'user_feedback' && responseType === 'replan') {
                     setPendingApproval(streamingMsgId);
                   }
+                  // Note: For clarifications, pendingApproval will be auto-set by useEffect
                 }
                 
                 if (typeof onMessageCreated === 'function') {
@@ -744,22 +800,34 @@ const appendToMessageContent = useCallback(
             }
     } else {
           const messageContent = handleResponse(result as HandlerResponse);
-          const isNewPlan = messageContent.includes('This revised plan requires your approval');
+          // Use the needsApproval flag from the response instead of parsing content
+          const needsApproval = (result as HandlerResponse).needsApproval || false;
           const resultMessage: MessageType = {
             id: Date.now() + 1,
             role: 'assistant',
             content: messageContent,
             timestamp: new Date(),
-            needsApproval: isNewPlan
+            needsApproval: needsApproval
           };
+          
+          // If a new plan is generated, clear the old plan's needsApproval flag
+          if (needsApproval) {
+            setMessages(prev => prev.map(m => 
+              m.id === message.id 
+                ? { ...m, needsApproval: false }
+                : m
+            ));
+          }
+          
           setMessages(prev => [...prev, resultMessage]);
           if (typeof onMessageCreated === 'function') {
             const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
             if (finalMsg) onMessageCreated(finalMsg);
           }
-          if (isNewPlan) {
+          if (needsApproval) {
             setPendingApproval(resultMessage.id);
-            }
+          }
+          // Note: For clarifications, pendingApproval will be auto-set by useEffect
           }
         }
       }
@@ -777,7 +845,6 @@ const appendToMessageContent = useCallback(
           m.id === message.id 
             ? { 
                 ...m, 
-                disapproved: false, 
                 hasTimedOut: true, 
                 canRetry: true, 
                 retryAction: 'feedback' as const,
@@ -814,6 +881,13 @@ const appendToMessageContent = useCallback(
     if (!message) {
       return;
     }
+    
+    // Only allow cancelling messages that need approval
+    if (!message.needsApproval) {
+      console.warn('Attempted to cancel a message that does not need approval:', messageId);
+      return;
+    }
+    
     setShowFeedbackForm(false);
     setFeedbackText('');
     setPendingApproval(null);
@@ -822,7 +896,7 @@ const appendToMessageContent = useCallback(
 
     // Update message to show it's cancelled
     setMessages(prev => prev.map(m => 
-      m.id === messageId 
+      m.id === message.id 
         ? { ...m, disapproved: true, needsApproval: false }
         : m
     ));
@@ -967,18 +1041,27 @@ const appendToMessageContent = useCallback(
     // Note: Loading state cleanup is handled by the parent component
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
+  // Enhanced input handlers
+  const handleFilesChange = (files: File[]): void => {
+    setAttachedFiles(files);
+  };
+
+  const handlePlanningToggle = (enabled: boolean): void => {
+    setUsePlanning(enabled);
+  };
+
   return (
     <div className={`flex flex-col h-full min-h-0 overflow-hidden bg-white border border-gray-200 rounded-lg ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50 rounded-t-lg">
-        <h3 className="font-semibold text-gray-900">Chat</h3>
+      <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50 rounded-t-lg h-12">
+        <h3 className="font-semibold text-gray-900">Explainable Agent</h3>
         <div className="flex items-center gap-2">
           {streamingActive && (
             <div className="flex items-center text-blue-600 text-sm">
@@ -1021,7 +1104,6 @@ const appendToMessageContent = useCallback(
                 onRetry={handleRetry}
               />
               
-              {/* Show ephemeral tool indicators only for the streaming message */}
               {(() => {
                 const shouldShow = message.isStreaming && 
                                  toolStepHistory?.messageId === message.id && 
@@ -1036,7 +1118,7 @@ const appendToMessageContent = useCallback(
 
     
         {/* Loading indicator */}
-        {isLoading && (
+        { isLoading && (
           <LoadingIndicator 
             activeTools={toolStepHistory?.steps.filter(s => s.status === 'calling').map(s => s.name)} 
           />
@@ -1085,25 +1167,19 @@ const appendToMessageContent = useCallback(
             </button>
           </div>
         ) : !showFeedbackForm ? (
-          <div className="flex gap-2">
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={placeholder}
-              disabled={disabled || isLoading}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed text-gray-900 bg-white"
-            />
-            <button
-              onClick={handleSend}
-              disabled={!inputValue.trim() || disabled || isLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
+          <EnhancedInput
+            value={inputValue}
+            onChange={setInputValue}
+            onSend={handleSend}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            disabled={disabled}
+            isLoading={isLoading}
+            usePlanning={usePlanning}
+            onPlanningToggle={handlePlanningToggle}
+            onFilesChange={handleFilesChange}
+            attachedFiles={attachedFiles}
+          />
         ) : null}
       </div>
     </div>

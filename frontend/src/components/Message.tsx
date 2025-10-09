@@ -25,6 +25,9 @@ const Message: React.FC<MessageComponentProps> = ({
     );
   }
 
+  if (!message.content || message.content.trim().length === 0) {
+    return null;
+  }
   // Regular message bubble layout
   return (
     <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -45,7 +48,7 @@ const Message: React.FC<MessageComponentProps> = ({
               : 'bg-gray-100 text-gray-900'
           }`}
         >
-          <div className="break-words prose prose-sm max-w-none">
+          <div className="break-words prose max-w-none">
             <MessageRenderer message={message} onAction={handleAction} />
           </div>
         </div>

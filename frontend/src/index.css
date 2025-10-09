@@ -17,8 +17,7 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Mobile-first responsive font size */
-  font-size: 14px;
+  font-size: 16px;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -53,12 +52,7 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-/* Tablet and larger screens */
-@media (min-width: 768px) {
-  :root {
-    font-size: 16px;
-  }
-}
+/* Font size is now 16px for all screen sizes */
 
 html,
 body,

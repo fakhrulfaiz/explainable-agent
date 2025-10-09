@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChatComponent, ExplorerPanel } from '../components';
-import ChatThreadSelector from '../components/ChatThreadSelector';
+// import ChatThreadSelector from '../components/ChatThreadSelector'; // Commented for future use
+import Sidebar from '../components/Sidebar';
 import { Message, HandlerResponse } from '../types/chat';
 import { GraphService } from '../api/services/graphService';
 import { ExplorerService } from '../api/services/explorerService';
@@ -24,6 +25,7 @@ const ChatWithApproval: React.FC = () => {
   const [explorerData, setExplorerData] = useState<any | null>(null);
   const [loadingThread, setLoadingThread] = useState<boolean>(false);
   const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false); // Sidebar state - starts closed
 
   // Streaming connection reference
   const eventSourceRef = React.useRef<EventSource | null>(null);
@@ -109,9 +111,7 @@ const ChatWithApproval: React.FC = () => {
   const handleMessageCreated = async (msg: Message) => {
     // Use the ref to get the most current thread ID, avoiding race conditions
     const threadId = currentThreadIdRef.current || state.currentThreadId || selectedChatThreadId || msg.threadId;
-    console.log('ChatWithApproval: handleMessageCreated ->', threadId);
     if (!threadId) {
-      console.warn('No thread ID available for message persistence:', msg);
       return;
     }
     try {
@@ -157,7 +157,7 @@ const ChatWithApproval: React.FC = () => {
   const createNewChatThread = async (initialMessage?: string): Promise<string> => {
     try {
       const thread = await ChatHistoryService.createThread({
-        title: initialMessage ? `Chat: ${initialMessage}` : 'New Chat',
+        title: initialMessage || 'New Chat',
         initial_message: initialMessage
       });
       return thread.thread_id;
@@ -176,15 +176,16 @@ const ChatWithApproval: React.FC = () => {
     streamingMessageId: number,
     chatThreadId: string,
     updateMessageCallback: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void,
+    usePlanning: boolean = true
   ): Promise<void> => {
     try {
       const startResponse = await GraphService.startStreamingGraph({
         human_request: messageContent,
-        thread_id: chatThreadId
+        thread_id: chatThreadId,
+        use_planning: usePlanning
       });
 
-      console.log('Started streaming for thread:', startResponse.thread_id);
       setThreadId(startResponse.thread_id);
       eventSourceRef.current = GraphService.streamResponse(
         startResponse.thread_id,
@@ -192,11 +193,9 @@ const ChatWithApproval: React.FC = () => {
           if (data.content) {
             updateMessageCallback(streamingMessageId, data.content);
           } else if (data.status) {
-            console.log('Stream status (from SSE):', data.status);
             setExecutionStatus(data.status);
-            console.log('setExecutionStatus called with:', data.status);
             if (onStatus) {
-              onStatus(data.status, data.eventData);
+              onStatus(data.status, data.eventData, data.response_type);  // Pass response_type
             }
           }
         },
@@ -206,7 +205,6 @@ const ChatWithApproval: React.FC = () => {
           throw error;
         },
         () => {
-          console.log('Streaming completed');
           setLoading(false);
         }
       );
@@ -224,7 +222,7 @@ const ChatWithApproval: React.FC = () => {
     humanComment?: string,
     streamingMessageId?: number,
     updateMessageCallback?: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void
   ): Promise<void> => {
     try {
       await GraphService.resumeStreamingGraph({
@@ -233,7 +231,7 @@ const ChatWithApproval: React.FC = () => {
         human_comment: humanComment
       });
 
-      console.log('Resumed streaming for thread:', threadId);
+      console.log('Resumed streaming for thread:', threadId, 'reviewAction:', reviewAction, 'humanComment:', humanComment);
 
       eventSourceRef.current = GraphService.streamResponse(
         threadId,
@@ -242,9 +240,8 @@ const ChatWithApproval: React.FC = () => {
             updateMessageCallback(streamingMessageId, data.content);
           } else if (data.status) {
             setExecutionStatus(data.status);
-            console.log('setExecutionStatus called with:', data.status);
             if (onStatus) {
-              onStatus(data.status, data.eventData);
+              onStatus(data.status, data.eventData, data.response_type);  // Pass response_type
             }
           }
         },
@@ -266,16 +263,20 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (message: string, _messageHistory: Message[]): Promise<HandlerResponse> => {
+  const handleSendMessage = async (message: string, messageHistory: Message[], options?: { usePlanning?: boolean; attachedFiles?: File[] }): Promise<HandlerResponse> => {
     setExplorerData(null);
     setExplorerOpen(false);
     setLoading(true);
     setExecutionStatus('running');
     
+    // Extract planning preference from options (defaults to true)
+    const usePlanning = options?.usePlanning ?? true;
+    
+    console.log('🔧 FRONTEND DEBUG: usePlanning =', usePlanning, 'options =', options);
+    
     try {
       
       let chatThreadId = selectedChatThreadId;
-      console.log('ChatWithApproval: handleSendMessage before createNewChatThread (selectedChatThreadId)', selectedChatThreadId);
       if (!chatThreadId) {
         chatThreadId = await createNewChatThread(message);
         // Immediately update the ref to avoid race conditions with message persistence
@@ -296,7 +297,8 @@ const ChatWithApproval: React.FC = () => {
         // Original blocking API call
         const response = await GraphService.startGraph({
           human_request: message,
-          thread_id: chatThreadId
+          thread_id: chatThreadId,
+          use_planning: usePlanning
         });
         if (response.run_status === 'user_feedback') {
           setExecutionStatus('user_feedback');
@@ -349,7 +351,7 @@ const ChatWithApproval: React.FC = () => {
             updateMessageCallback: (id: number, content: string) => void,
             onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
           ) => {
-            await startStreamingForMessage(message, streamingMessageId, chatThreadId, updateMessageCallback, onStatus);
+            await startStreamingForMessage(message, streamingMessageId, chatThreadId, updateMessageCallback, onStatus, usePlanning);
           }
         };
       }
@@ -370,7 +372,7 @@ const ChatWithApproval: React.FC = () => {
     }
 
     try {
-      console.log('Approving plan for thread:', threadId);
+      console.log('Approving plan for thread:', threadId, 'useStreaming:', useStreaming);
       setLoading(true);
       setExecutionStatus('running');
 
@@ -393,11 +395,8 @@ const ChatWithApproval: React.FC = () => {
             }
           }
           
-          if (selectedChatThreadId) {
-            // Message will be stored automatically by ChatComponent via onMessageCreated
-            
+          if (selectedChatThreadId) {     
             if (response.steps && response.steps.length > 0) {
-              // Explorer message will be stored automatically by ChatComponent via onMessageCreated
               setExplorerData(response);
               setExplorerOpen(true);
               return {
@@ -445,8 +444,7 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  const handleFeedback = async (content: string, message: Message): Promise<HandlerResponse> => {
-    console.log('Feedback attempt:', { messageId: message.id, feedback: content });
+  const handleFeedback = async (content: string, _message: Message): Promise<HandlerResponse> => {
     
     const threadId = state.currentThreadId;
     
@@ -455,21 +453,25 @@ const ChatWithApproval: React.FC = () => {
     }
 
     try {
-      console.log('Providing feedback for thread:', threadId);
 
       if (!useStreaming) {
         // Original blocking approach
         const response = await GraphService.provideFeedbackAndContinue(threadId, content);
         
         if (response.run_status === 'user_feedback') {
-          const newPlan = response.assistant_response || response.plan || 'Revised plan generated - awaiting approval';
-          const revisedResponse = `**Revised Plan:**\n\n${newPlan}\n\n**This revised plan requires your approval before execution.**`;
+          const responseMessage = response.assistant_response || response.plan || 'Response generated';
+          
+          // Check response_type to determine if it needs approval
+          // "replan" = new plan that needs approval
+          // "answer" = clarification that doesn't need approval
+          const needsApproval = response.response_type === 'replan';
           
           // User feedback message will be stored automatically by ChatComponent via onMessageCreated
           
           return {
-            message: revisedResponse,
-            needsApproval: true
+            message: responseMessage,
+            needsApproval: needsApproval,
+            response_type: response.response_type
           };
           
         } else if (response.run_status === 'finished') {
@@ -669,78 +671,90 @@ const ChatWithApproval: React.FC = () => {
   };
 
   return (
-    <div style={{ height: '100%', padding: '0 0.5rem', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-      <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      
-        {/* Thread Selector */}
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex-1">
-            <ChatThreadSelector
-              selectedThreadId={selectedChatThreadId || undefined}
-              onThreadSelect={handleThreadSelect}
-              onNewThread={handleNewThread}
-            />
-          </div>
-          <div className="ml-4 flex items-center gap-4 flex-shrink-0">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={useStreaming}
-                onChange={(e) => {
-                  setUseStreaming(e.target.checked);
-                }}
-              />
-              Streaming {useStreaming ? '(on)' : '(off)'}
-            </label>
-            <div className="text-xs text-gray-500 w-86 text-right">
-              {selectedChatThreadId ? `Thread ID: ${selectedChatThreadId}` : ''}
-            </div>
-          </div>
-        </div>
+    <div className="relative h-full">
+      {/* Sidebar */}
+      <Sidebar
+        selectedThreadId={selectedChatThreadId || undefined}
+        onThreadSelect={handleThreadSelect}
+        onNewThread={handleNewThread}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
+      />
 
-        {/* Chat Container */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-          <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <div className="flex-1 min-h-0" style={{ overflow: 'hidden' }}>
-              <ChatComponent
-                key={`chat-approval-${chatKey}`}
-                onSendMessage={handleSendMessage}
-                onApprove={handleApprove}
-                onFeedback={handleFeedback}
-                onCancel={handleCancel}
-                onRetry={handleRetry}
-                currentThreadId={state.currentThreadId || selectedChatThreadId}
-                initialMessages={restoredMessages}
-                placeholder="Ask me anything..."
-                className="h-full"
-                onMessageCreated={handleMessageCreated}
+      {/* Main Content - dynamic left padding based on sidebar (desktop only) */}
+      <div className={`h-full min-h-0 overflow-hidden flex flex-col pl-0 ${sidebarOpen ? 'md:pl-80' : 'md:pl-[4.5rem]'}`} style={{ padding: '0 0.5rem' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        
+          {/* Thread Selector - Commented for future use */}
+          {/* <div className="mb-4 flex items-center justify-between">
+            <div className="flex-1">
+              <ChatThreadSelector
+                selectedThreadId={selectedChatThreadId || undefined}
+                onThreadSelect={handleThreadSelect}
+                onNewThread={handleNewThread}
               />
             </div>
+            <div className="ml-4 flex items-center gap-4 flex-shrink-0">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={useStreaming}
+                  onChange={(e) => {
+                    setUseStreaming(e.target.checked);
+                  }}
+                />
+                Streaming {useStreaming ? '(on)' : '(off)'}
+              </label>
+              <div className="text-xs text-gray-500 w-86 text-right">
+                {selectedChatThreadId ? `Thread ID: ${selectedChatThreadId}` : ''}
+              </div>
+            </div>
+          </div> */}
+
+          {/* Chat Container */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+            <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+              <div className="flex-1 min-h-0" style={{ overflow: 'hidden' }}>
+                <ChatComponent
+                  key={`chat-approval-${chatKey}`}
+                  onSendMessage={handleSendMessage}
+                  onApprove={handleApprove}
+                  onFeedback={handleFeedback}
+                  onCancel={handleCancel}
+                  onRetry={handleRetry}
+                  currentThreadId={state.currentThreadId || selectedChatThreadId}
+                  initialMessages={restoredMessages}
+                  placeholder="Ask me anything..."
+                  className="h-full"
+                  onMessageCreated={handleMessageCreated}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 text-center">
+            {state.currentThreadId || selectedChatThreadId && (
+              <span className="text-xs text-gray-500 mr-4">
+                Graph Thread: {state.currentThreadId || selectedChatThreadId}
+              </span>
+            )}
+            {/* Note: pendingApproval status is now handled in ChatComponent */}
+            {state.isLoading && (
+              <span className="text-xs text-blue-600 mr-4">
+                Processing...
+              </span>
+            )}
+            {loadingThread && (
+              <span className="text-xs text-blue-600 mr-4">
+                Loading thread...
+              </span>
+            )}
           </div>
         </div>
-
-
-        <div className="mt-4 text-center">
-          {state.currentThreadId || selectedChatThreadId && (
-            <span className="text-xs text-gray-500 mr-4">
-              Graph Thread: {state.currentThreadId || selectedChatThreadId}
-            </span>
-          )}
-          {/* Note: pendingApproval status is now handled in ChatComponent */}
-          {state.isLoading && (
-            <span className="text-xs text-blue-600 mr-4">
-              Processing...
-            </span>
-          )}
-          {loadingThread && (
-            <span className="text-xs text-blue-600 mr-4">
-              Loading thread...
-            </span>
-          )}
-        </div>
+        
+        {/* Slide-out Explorer Panel */}
+        <ExplorerPanel open={explorerOpen} onClose={() => setExplorerOpen(false)} data={explorerData} />
       </div>
-      {/* Slide-out Explorer Panel */}
-      <ExplorerPanel open={explorerOpen} onClose={() => setExplorerOpen(false)} data={explorerData} />
     </div>
   );
 };

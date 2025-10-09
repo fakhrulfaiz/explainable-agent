@@ -144,7 +144,11 @@ export class GraphService {
     eventSource.addEventListener('status', (event) => {
       try {
         const data = JSON.parse(event.data);
-        onMessageCallback({ status: data.status });
+        // Pass through response_type if it exists in the status event
+        onMessageCallback({ 
+          status: data.status, 
+          response_type: data.response_type  // Include response_type from backend
+        });
         
         // Mark that we've received a status event for this connection
         // This helps us distinguish between normal completion and errors

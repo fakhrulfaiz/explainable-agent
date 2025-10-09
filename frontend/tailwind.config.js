@@ -28,16 +28,15 @@ export default {
         ]
       },
       fontSize: {
-        // Mobile-first font sizes
-        'xs': ['12px', { lineHeight: '1.4' }],
-        'sm': ['13px', { lineHeight: '1.5' }],
-        'base': ['14px', { lineHeight: '1.5' }],
-        'lg': ['16px', { lineHeight: '1.5' }],
-        'xl': ['18px', { lineHeight: '1.4' }],
-        '2xl': ['20px', { lineHeight: '1.3' }],
-        '3xl': ['24px', { lineHeight: '1.2' }],
-        '4xl': ['28px', { lineHeight: '1.2' }],
-        '5xl': ['32px', { lineHeight: '1.1' }],
+        'xs': ['0.75rem', { lineHeight: '1.5' }],      // 12px
+        'sm': ['0.875rem', { lineHeight: '1.5' }],     // 14px
+        'base': ['1rem', { lineHeight: '1.5' }],       // 16px
+        'lg': ['1.125rem', { lineHeight: '1.5' }],     // 18px
+        'xl': ['1.25rem', { lineHeight: '1.4' }],      // 20px
+        '2xl': ['1.5rem', { lineHeight: '1.3' }],      // 24px
+        '3xl': ['1.875rem', { lineHeight: '1.2' }],    // 30px
+        '4xl': ['2.25rem', { lineHeight: '1.2' }],     // 36px
+        '5xl': ['3rem', { lineHeight: '1.1' }],        // 48px
       },
       screens: {
         'xs': '480px',
