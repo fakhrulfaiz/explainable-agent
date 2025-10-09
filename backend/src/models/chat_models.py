@@ -14,7 +14,7 @@ class ChatMessage(BaseModel):
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
     
     # Additional fields from frontend Message interface
-    message_id: Optional[int] = Field(None, description="Message ID from frontend")
+    message_id: int = Field(..., description="Message ID from frontend")
     needs_approval: Optional[bool] = Field(None, description="Whether message needs approval")
     approved: Optional[bool] = Field(None, description="Whether message is approved")
     disapproved: Optional[bool] = Field(None, description="Whether message is disapproved")
@@ -80,7 +80,7 @@ class AddMessageRequest(BaseModel):
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
     
     # Additional fields from frontend Message interface
-    message_id: Optional[int] = Field(None, description="Message ID from frontend")
+    message_id: int = Field(..., description="Message ID from frontend")
     needs_approval: Optional[bool] = Field(None, description="Whether message needs approval")
     approved: Optional[bool] = Field(None, description="Whether message is approved")
     disapproved: Optional[bool] = Field(None, description="Whether message is disapproved")

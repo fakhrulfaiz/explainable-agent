@@ -111,6 +111,7 @@ class GraphResponse(BaseModel):
     final_result: Optional[FinalResult] = Field(None, description="Final structured result if completed")
     total_time: Optional[float] = Field(None, description="Total execution time if completed")
     overall_confidence: Optional[float] = Field(None, description="Overall confidence score if completed")
+    response_type: Optional[str] = Field(None, description="Type of response: 'answer' for clarifications, 'replan' for new plans, 'cancel' for cancellations")
 
 
 class GraphStatusResponse(BaseModel):

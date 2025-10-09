@@ -32,8 +32,11 @@ def create_graph_streaming(request: StartRequest):
     
     run_configs[thread_id] = {
         "type": "start",
-        "human_request": request.human_request
+        "human_request": request.human_request,
+        "use_planning": request.use_planning,
+        "agent_type": request.agent_type
     }
+    
     
     return GraphResponse(
         thread_id=thread_id,
@@ -76,13 +79,17 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
     input_state = None
     if run_data["type"] == "start":
         event_type = "start"
+        use_planning_value = run_data.get("use_planning", True)
+        
         initial_state = ExplainableAgentState(
             messages=[HumanMessage(content=run_data["human_request"])],
             query=run_data["human_request"],
             plan="",
             steps=[],
             step_counter=0,
-            status="approved"
+            status="approved",
+            use_planning=use_planning_value,
+            agent_type=run_data.get("agent_type", "assistant")
         )
         input_state = initial_state
     else:
@@ -102,15 +109,12 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
         
         # Initial event with thread_id
         initial_data = json.dumps({"thread_id": thread_id})
-        print(f"DEBUG: Sending initial {event_type} event with data: {initial_data}")
 
         yield {"event": event_type, "data": initial_data}
         
         try:
-            print(f"DEBUG: Starting to stream graph messages for thread_id={thread_id}")
             for msg, metadata in agent.graph.stream(input_state, config, stream_mode="messages"):
                 if await request.is_disconnected():
-                    print("DEBUG: Client disconnected, breaking stream loop")
                     break
                 
            
@@ -144,14 +148,12 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
                     # Filter: only emit tool calls from planner or agent nodes
                     if node_name in ['agent']:
-                        print(f"DEBUG: Found tool calls in {node_name}: {[tc.get('name') for tc in msg.tool_calls]}")
                         for tool_call in msg.tool_calls:
                             tool_name = tool_call.get('name', '')
                             tool_id = tool_call.get('id', '')
                             
                             # Skip empty or invalid tool calls
                             if not tool_name or not tool_id:
-                                print(f"DEBUG: Skipping invalid tool call: name='{tool_name}', id='{tool_id}'")
                                 continue
                                 
                             tool_call_data = json.dumps({
@@ -160,20 +162,18 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
                                 "node": node_name,
                                 "tool_id": tool_id
                             })
-                            print(f"DEBUG: Emitting tool_call event: {tool_call_data}")
                             yield {"event": "tool_call", "data": tool_call_data}
                 
                 # Handle tool results (from ToolMessage)
                 elif hasattr(msg, 'tool_call_id') and hasattr(msg, 'content'):
                     # This is a tool result message 
-                    print(f"DEBUG: Found tool result for call_id: {msg.tool_call_id}")
+        
                     tool_result_data = json.dumps({
                         "status": "tool_result",
                         "tool_call_id": msg.tool_call_id,
                         "node": node_name,
                         "content": msg.content[:200] + "..." if len(msg.content) > 200 else msg.content  # Truncate long results
                     })
-                    print(f"DEBUG: Emitting tool_result event: {tool_result_data}")
                     yield {"event": "tool_result", "data": tool_result_data}
                 
                 # Stream tokens from AI messages for real-time display
@@ -231,12 +231,10 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
                 del run_configs[thread_id]
                 
         except Exception as e:
-            print(f"DEBUG: Exception in event_generator: {str(e)}")
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
             
             # Clean up on error as well
             if thread_id in run_configs:
-                print(f"DEBUG: Cleaning up thread_id={thread_id} from run_configs after error")
                 del run_configs[thread_id]
     
     return EventSourceResponse(event_generator())

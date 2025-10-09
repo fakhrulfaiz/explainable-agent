@@ -33,6 +33,7 @@ class ExplainableAgentState(MessagesState):
     status: Literal["approved", "feedback", "cancelled"]
     assistant_response: str
     use_planning: bool = True  # Planning preference from API
+    response_type: Optional[Literal["answer", "replan", "cancel"]] = None  # Type of response from planner
     
     # Agent routing information
     agent_type: str = "data_exploration_agent"  # Which specialized agent to use
@@ -59,7 +60,7 @@ class ExplainableAgent:
         self.create_handoff_tools()
         
         # Create assistant as a react agent with transfer tools
-        self.assistant_agent = create_react_agent(
+        base_assistant_agent = create_react_agent(
             model=llm,
             tools=[self.transfer_to_data_exploration, self.transfer_to_general_agent],  # Add transfer_to_explainer_agent when ready
             prompt=(
@@ -81,6 +82,28 @@ class ExplainableAgent:
             ),
             name="assistant"
         )
+        
+        # Store use_planning value for tools to access
+        self._use_planning = None
+        
+        def assistant_agent(state):
+            use_planning = state.get("use_planning", True)
+            agent_type = state.get("agent_type", "data_exploration_agent")
+            query = state.get("query", "")
+            
+            # Store use_planning value for tools to access
+            self._use_planning = use_planning
+            
+            result = base_assistant_agent.invoke(state)
+            
+            if isinstance(result, dict):
+                result["use_planning"] = use_planning
+                result["agent_type"] = agent_type
+                result["query"] = query
+            
+            return result
+        
+        self.assistant_agent = assistant_agent
         
         # Create the graph
         self.graph = self.create_graph()
@@ -112,7 +135,11 @@ class ExplainableAgent:
                         query = msg.content
                         break
             
-            # Ensure all required fields are present with defaults
+            # Get use_planning value from stored value
+            use_planning = self._use_planning
+            if use_planning is None:
+                use_planning = state.get("use_planning", True)
+            
             update_state = {
                 "messages": state.get("messages", []) + [tool_message],
                 "agent_type": "data_exploration_agent",
@@ -124,8 +151,9 @@ class ExplainableAgent:
                 "human_comment": state.get("human_comment"),
                 "status": state.get("status", "approved"),
                 "assistant_response": state.get("assistant_response", ""),
-                "use_planning": state.get("use_planning", True)
+                "use_planning": use_planning
             }
+            
             
             return Command(
                 goto="data_exploration_flow",
@@ -159,7 +187,11 @@ class ExplainableAgent:
                         query = msg.content
                         break
             
-            # Ensure all required fields are present with defaults
+            # Get use_planning value from stored value
+            use_planning = self._use_planning
+            if use_planning is None:
+                use_planning = state.get("use_planning", True)
+            
             update_state = {
                 "messages": state.get("messages", []) + [tool_message],
                 "agent_type": "general_agent",
@@ -171,7 +203,7 @@ class ExplainableAgent:
                 "human_comment": state.get("human_comment"),
                 "status": state.get("status", "approved"),
                 "assistant_response": state.get("assistant_response", ""),
-                "use_planning": state.get("use_planning", True)
+                "use_planning": use_planning
             }
             
             return Command(
@@ -249,8 +281,8 @@ class ExplainableAgent:
     def general_agent_entry(self, state: ExplainableAgentState):
         return state
     
+    
     def should_plan(self, state: ExplainableAgentState):
-      
         agent_type = state.get("agent_type", "data_exploration_agent")
         use_planning = state.get("use_planning", True)
         
@@ -260,7 +292,6 @@ class ExplainableAgent:
                 return "planner"  # Go through planning first
             else:
                 return "agent"    # Go directly to data exploration
-
 
         # Default fallback to data exploration
         return "planner" if use_planning else "agent"

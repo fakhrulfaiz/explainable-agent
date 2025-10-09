@@ -62,6 +62,7 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             
             assistant_response = current_values.get("assistant_response") or current_values.get("plan", "Plan generated - awaiting approval")
             plan = current_values.get("plan", "")
+            response_type = current_values.get("response_type")  # Get response_type from state
             
             return GraphResponse(
                 thread_id=thread_id,
@@ -69,7 +70,8 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                 query=query,
                 run_status=execution_status, 
                 assistant_response=assistant_response,
-                plan=plan
+                plan=plan,
+                response_type=response_type  # Include response_type in response
             )
         else:
             execution_status = ExecutionStatus.FINISHED
@@ -155,6 +157,7 @@ def start_graph(
         thread_id = request.thread_id or str(uuid4())
         config = {"configurable": {"thread_id": thread_id}}
          
+        
         initial_state = ExplainableAgentState(
             messages=[HumanMessage(content=request.human_request)],
             query=request.human_request,
@@ -164,9 +167,10 @@ def start_graph(
             status="approved",
             assistant_response="",
             use_planning=request.use_planning,  # Set planning preference from API
-            agent_type="data_exploration_agent",  # Default, will be set by assistant node
-            routing_reason=""  # Will be filled by assistant node
+            agent_type="data_exploration_agent",  # Skip assistant node, go directly to data exploration
+            routing_reason="Direct routing to data exploration agent"  # Skip assistant node
         )
+        
         
         return run_graph_and_response(agent, initial_state, config)
     except Exception as e:
@@ -465,12 +469,14 @@ async def start_graph_stream(
                 # Waiting for user feedback
                 current_values = final_state.values
                 assistant_response = current_values.get("assistant_response") or current_values.get("plan", "Plan generated - awaiting approval")
+                response_type = current_values.get("response_type")  # Get response_type from state
                 
                 yield yield_sse_event("waiting_feedback", {
                     "status": "user_feedback",
                     "thread_id": thread_id,
                     "plan": current_values.get("plan", ""),
                     "assistant_response": assistant_response,
+                    "response_type": response_type,  # Include response_type
                     "timestamp": datetime.now().isoformat()
                 })
             else:
@@ -607,11 +613,13 @@ async def resume_graph_stream(
             if final_state.next and "human_feedback" in final_state.next:
                 # Still waiting for more feedback
                 current_values = final_state.values
+                response_type = current_values.get("response_type")  # Get response_type from state
                 yield yield_sse_event("waiting_feedback", {
                     "status": "user_feedback",
                     "thread_id": request.thread_id,
                     "plan": current_values.get("plan", ""),
                     "assistant_response": current_values.get("assistant_response", ""),
+                    "response_type": response_type,  # Include response_type
                     "timestamp": datetime.now().isoformat()
                 })
             else:

@@ -96,7 +96,8 @@ consider replan. For vague feedback, ask for clarification. If user ask question
                     "steps": state.get("steps", []),
                     "step_counter": state.get("step_counter", 0),
                     "assistant_response": response.content,
-                    "status": "cancelled"
+                    "status": "cancelled",
+                    "response_type": "cancel"
                 }
             elif response.response_type == "answer":
                 answer_message = AIMessage(content=response.content)
@@ -107,7 +108,8 @@ consider replan. For vague feedback, ask for clarification. If user ask question
                     "steps": state.get("steps", []),
                     "step_counter": state.get("step_counter", 0),
                     "assistant_response": response.content,
-                    "status": "feedback" 
+                    "status": "feedback",
+                    "response_type": "answer"  # Mark as clarification/answer
                 }
             elif response.response_type == "replan":
                 plan = response.content
@@ -120,7 +122,8 @@ consider replan. For vague feedback, ask for clarification. If user ask question
                     "steps": [],  # Reset steps for new plan
                     "step_counter": 0,  # Reset counter for new plan
                     "assistant_response": response.content,
-                    "status": "feedback"  # Require approval for new plan
+                    "status": "feedback",  # Require approval for new plan
+                    "response_type": "replan"  # Mark as new plan
                 }
             else:
                 # Fallback case - treat as replan
@@ -133,7 +136,8 @@ consider replan. For vague feedback, ask for clarification. If user ask question
                     "steps": [],  # Reset steps for new plan
                     "step_counter": 0,  # Reset counter
                     "assistant_response": plan,
-                    "status": "feedback"
+                    "status": "feedback",
+                    "response_type": "replan"  # Mark as replan
                 }
                 
         except Exception as e:
@@ -148,7 +152,8 @@ consider replan. For vague feedback, ask for clarification. If user ask question
                 "steps": state.get("steps", []),  # Preserve steps on error
                 "step_counter": state.get("step_counter", 0),
                 "assistant_response": plan,
-                "status": "feedback"  # Stay in feedback mode for retry
+                "status": "feedback",  # Stay in feedback mode for retry
+                "response_type": "answer"  # Treat errors as answers/clarifications
             }
     
     def _handle_initial_planning(self, state, messages, user_query):
