@@ -194,7 +194,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           isOpen ? 'w-96 opacity-100' : 'w-0 opacity-0'
         } overflow-hidden`}
       >
-        <div className="flex flex-col h-full w-96">
+        <div className="flex flex-col h-full w-96 max-w-96 overflow-hidden">
           {/* Header with Toggle and New Thread */}
           <div className="pt-4 px-3 pb-2 space-y-2">
             {/* Toggle Row - whole row clickable */}
@@ -239,7 +239,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Separator className="bg-gray-200" />
 
           {/* Threads List */}
-          <ScrollArea className="flex-1 px-2">
+          <ScrollArea className="flex-1 px-2 max-w-full overflow-hidden">
             {loading ? (
               <div className="p-4 text-center text-gray-500 text-sm">
                 Loading threads...
@@ -260,11 +260,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {searchQuery ? 'No matching threads' : 'No chat threads found'}
               </div>
             ) : (
-              <div className="space-y-1 py-2">
+              <div className="space-y-1 py-2 max-w-full overflow-hidden">
                 {filteredThreads.map((thread) => (
                   <div
                     key={thread.thread_id}
-                    className={`relative group rounded-lg transition-colors ${
+                    className={`relative group rounded-lg transition-colors overflow-hidden ${
                       selectedThreadId === thread.thread_id 
                         ? 'bg-gray-100' 
                         : 'hover:bg-gray-50'
@@ -272,9 +272,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <div
                       onClick={() => { handleThreadSelect(thread.thread_id); onToggle(); }}
-                      className="flex items-start justify-between p-3 cursor-pointer"
+                      className="flex items-start gap-2 p-3 cursor-pointer min-w-0 w-full"
                     >
-                      <div className="min-w-0 flex-1 pr-3">
+                      <div className="min-w-0 flex-1 pr-3 overflow-hidden max-w-[calc(100%-3rem)]">
                         {editingTitle === thread.thread_id ? (
                           <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <Input
@@ -295,12 +295,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                           </div>
                         ) : (
                           <>
-                            <div className="font-medium text-sm truncate mb-1 text-gray-900">
+                            <div className="font-medium text-sm truncate mb-1 text-gray-900 max-w-[250px]">
                               <MessageSquare className="w-3 h-3 inline mr-2" />
                               {thread.title || 'Untitled Chat'}
                             </div>
                             {thread.last_message && (
-                              <div className="text-xs text-gray-500 truncate max-w-[200px]">
+                              <div className="text-xs text-gray-500 truncate max-w-[250px]">
                                 {thread.last_message}
                               </div>
                             )}
@@ -321,10 +321,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                             e.stopPropagation();
                             setShowActions(showActions === thread.thread_id ? null : thread.thread_id);
                           }}
-                          className="opacity-30 group-hover:opacity-100 p-1.5 hover:bg-gray-200 rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center"
+                          className="opacity-100 p-1.5 hover:bg-gray-200 rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center ml-2"
                           title="Thread options"
                         >
-                          <MoreVertical className="w-4 h-4 text-gray-600" />
+                          <MoreVertical className="w-5 h-5 text-gray-800" />
                         </button>
                       )}
                     </div>
