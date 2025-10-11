@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Search, MessageSquare, Calendar, MoreVertical, Trash2, Edit, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { ChatHistoryService, ChatThreadSummary } from '../api/services/chatHistoryService';
 import { ScrollArea } from './ui/scroll-area';
@@ -34,6 +34,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     threadId: '',
     threadTitle: ''
   });
+  const [actionMenuPosition, setActionMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const actionButtonRef = useRef<HTMLButtonElement>(null);
 
   // Load threads only on first open (or via Refresh)
   useEffect(() => {
@@ -59,11 +61,13 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleThreadSelect = (threadId: string) => {
     onThreadSelect(threadId);
     setShowActions(null);
+    setActionMenuPosition(null);
   };
 
   const handleNewThread = () => {
     onNewThread();
     setShowActions(null);
+    setActionMenuPosition(null);
   };
 
   const handleDeleteThread = (threadId: string, threadTitle: string, e: React.MouseEvent) => {
@@ -74,6 +78,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       threadTitle: threadTitle || 'Untitled Chat'
     });
     setShowActions(null);
+    setActionMenuPosition(null);
   };
 
   const handleConfirmDelete = async () => {
@@ -101,6 +106,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     setEditingTitle(threadId);
     setNewTitle(currentTitle || 'Untitled Chat');
     setShowActions(null);
+    setActionMenuPosition(null);
   };
 
   const handleSaveTitle = async (threadId: string) => {
@@ -239,7 +245,8 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Separator className="bg-gray-200" />
 
           {/* Threads List */}
-          <ScrollArea className="flex-1 px-2 max-w-full overflow-visible">
+          <div className="flex-1 overflow-hidden">
+            <ScrollArea className="h-full px-2">
             {loading ? (
               <div className="p-4 text-center text-gray-500 text-sm">
                 Loading threads...
@@ -314,24 +321,41 @@ const Sidebar: React.FC<SidebarProps> = ({
                         )}
                       </div>
 
-                      {/* Actions Button */}
-                      {editingTitle !== thread.thread_id && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setShowActions(showActions === thread.thread_id ? null : thread.thread_id);
-                          }}
-                          className="opacity-100 p-1.5 hover:bg-gray-200 rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center ml-2"
-                          title="Thread options"
-                        >
-                          <MoreVertical className="w-5 h-5 text-gray-800" />
-                        </button>
-                      )}
+                       {/* Actions Button */}
+                       {editingTitle !== thread.thread_id && (
+                         <button
+                           ref={actionButtonRef}
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             if (showActions === thread.thread_id) {
+                               setShowActions(null);
+                               setActionMenuPosition(null);
+                             } else {
+                               const rect = e.currentTarget.getBoundingClientRect();
+                               setActionMenuPosition({
+                                 top: rect.bottom + 4,
+                                 left: rect.right - 144 // 144px is min-w-36 (9rem)
+                               });
+                               setShowActions(thread.thread_id);
+                             }
+                           }}
+                           className="opacity-100 p-1.5 hover:bg-gray-200 rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center ml-2"
+                           title="Thread options"
+                         >
+                           <MoreVertical className="w-5 h-5 text-gray-800" />
+                         </button>
+                       )}
                     </div>
 
-                    {/* Actions Menu */}
-                    {showActions === thread.thread_id && (
-                      <div className="absolute right-3 top-12 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] min-w-36 overflow-visible">
+                     {/* Actions Menu */}
+                     {showActions === thread.thread_id && actionMenuPosition && (
+                       <div 
+                         className="fixed bg-white border border-gray-200 rounded-lg shadow-lg z-[200] min-w-36"
+                         style={{
+                           top: `${actionMenuPosition.top}px`,
+                           left: `${actionMenuPosition.left}px`
+                         }}
+                       >
                         <button
                           onClick={(e) => handleEditTitle(thread.thread_id, thread.title || '', e)}
                           className="w-full flex items-center gap-2 p-2 hover:bg-gray-50 text-left text-sm text-gray-700"
@@ -347,12 +371,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                           Delete
                         </button>
                       </div>
-                    )}
+                     )}
                   </div>
                 ))}
               </div>
             )}
-          </ScrollArea>
+            </ScrollArea>
+          </div>
 
           {/* Footer */}
           <div className="p-3 border-t border-gray-200">

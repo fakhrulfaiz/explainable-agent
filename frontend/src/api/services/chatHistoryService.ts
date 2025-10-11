@@ -27,7 +27,7 @@ export interface AddMessageRequest {
   thread_id: string;
   sender: 'user' | 'assistant';
   content: string;
-  message_type?: 'message' | 'explorer';
+  message_type?: 'message' | 'explorer' | 'visualization';
   checkpoint_id?: string;
   
   // Additional fields from frontend Message interface

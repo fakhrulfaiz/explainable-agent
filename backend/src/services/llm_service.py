@@ -3,7 +3,7 @@ LLM Service for runtime model switching and management
 """
 from typing import Dict, Any, Optional
 from langchain_openai import ChatOpenAI
-from langchain_community.chat_models import ChatOllama
+from langchain_ollama import ChatOllama
 from langchain_deepseek import ChatDeepSeek
 from langchain_groq import ChatGroq
 from src.models.config import settings
@@ -63,7 +63,6 @@ class LLMService:
             else:
                 raise ValueError(f"Unsupported LLM provider: {provider}")
             
-            logger.info(f"✅ Created {provider} LLM with model: {model}")
             return llm
             
         except Exception as e:
@@ -88,24 +87,19 @@ class LLMService:
             del llm_instance
             gc.collect()
             
-            logger.debug("🧹 Old LLM instance cleaned up successfully")
-            
         except Exception as e:
-            logger.warning(f"⚠️  Failed to cleanup old LLM instance: {e}")
+            pass
 
     def switch_llm(self, provider: str, model: str = None, **kwargs):
         """Switch to a different LLM provider/model at runtime with proper cleanup"""
         old_llm = self._current_llm
         
         try:
-            logger.info(f"🔄 Switching LLM to {provider} - {model}")
-            
             # Create new LLM instance
             new_llm = self.create_llm(provider, model, **kwargs)
             
             # Test the new LLM with a simple query
             test_response = new_llm.invoke("Hello")
-            logger.debug(f"✅ LLM test successful")
             
             # Cleanup old LLM before setting new one
             if old_llm is not None:
@@ -119,7 +113,6 @@ class LLMService:
                 'kwargs': kwargs
             }
             
-            logger.info(f"🎉 Successfully switched to {provider} - {model}")
             return {
                 'status': 'success',
                 'provider': provider,
@@ -128,7 +121,6 @@ class LLMService:
             }
             
         except Exception as e:
-            logger.error(f"❌ Failed to switch to {provider} - {model}: {e}")
             return {
                 'status': 'error',
                 'message': str(e)

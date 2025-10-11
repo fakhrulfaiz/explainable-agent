@@ -13,11 +13,12 @@ export interface Message {
   canRetry?: boolean;
   retryAction?: 'approve' | 'feedback' | 'cancel';
   threadId?: string;
-  messageType?: 'message' | 'explorer';
+  messageType?: 'message' | 'explorer' | 'visualization';
   checkpointId?: string;
   // New fields for rich content
   metadata?: {
     explorerData?: any;
+    visualizations?: any[];
     [key: string]: any;
   };
 }
@@ -27,6 +28,8 @@ export interface HandlerResponse {
   message: string;
   needsApproval?: boolean;
   explorerData?: any;
+  visualizations?: any[];
+  checkpoint_id?: string; // Add checkpoint ID for both explorer and visualization messages
   response_type?: 'answer' | 'replan' | 'cancel';  // Type of response from backend
   // New streaming properties
   isStreaming?: boolean;
@@ -39,7 +42,7 @@ export interface HandlerResponse {
 
 
 export interface ChatComponentProps {
-  onSendMessage: (message: string, messageHistory: Message[], options?: { usePlanning?: boolean; attachedFiles?: File[] }) => Promise<HandlerResponse>;
+  onSendMessage: (message: string, messageHistory: Message[], options?: { usePlanning?: boolean; useExplainer?: boolean; attachedFiles?: File[] }) => Promise<HandlerResponse>;
   onApprove?: (content: string, message: Message) => Promise<HandlerResponse | void> | HandlerResponse | void;
   onFeedback?: (content: string, message: Message) => Promise<HandlerResponse | void> | HandlerResponse | void;
   onCancel?: (content: string, message: Message) => Promise<string> | string;
@@ -70,6 +73,7 @@ export interface StartRequest {
   human_request: string;
   thread_id?: string; // Optional thread ID for existing conversations
   use_planning?: boolean; // Whether to use planning in agent execution
+  use_explainer?: boolean; // Whether to use explainer node for step explanations
   agent_type?: string; // Type of agent to use
 }
 
@@ -82,13 +86,13 @@ export interface ResumeRequest {
 export interface StepExplanation {
   id: number;
   type: string;
-  decision: string;
-  reasoning: string;
   input: string;
   output: string;
-  confidence: number;
-  why_chosen: string;
   timestamp: string;
+  decision?: string;
+  reasoning?: string;
+  confidence?: number;
+  why_chosen?: string;
 }
 
 export interface FinalResult {
@@ -101,6 +105,7 @@ export interface FinalResult {
 
 export interface GraphResponse {
   thread_id: string;
+  checkpoint_id?: string; // Add checkpoint ID field
   run_status: 'user_feedback' | 'finished' | 'error';
   assistant_response?: string;
   query?: string;  // User's original question
@@ -111,6 +116,7 @@ export interface GraphResponse {
   total_time?: number;
   overall_confidence?: number;
   response_type?: 'answer' | 'replan' | 'cancel';  // Type of response from planner
+  visualizations?: any[]; // Visualization specs for frontend rendering
 }
 
 export interface GraphStatus {

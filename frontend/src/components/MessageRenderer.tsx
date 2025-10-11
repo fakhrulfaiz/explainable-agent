@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Message } from '../types/chat';
 import { ExplorerRenderer } from './renderers/ExplorerRenderer';
 import { markdownComponents } from '../utils/markdownComponents';
+import VisualizationRenderer from './renderers/VisualizationRenderer';
 
 interface MessageRendererProps {
   message: Message;
@@ -21,7 +22,15 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
             content={message.content}
           />
         );
+    
       
+      case 'visualization':
+        return (
+          <VisualizationRenderer 
+            charts={message.metadata?.visualizations}
+            onOpenVisualization={() => onAction?.('openVisualization', message.metadata?.visualizations)}
+          />
+        );
       case 'message':
       default:
         return (

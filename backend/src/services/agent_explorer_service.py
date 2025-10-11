@@ -27,7 +27,7 @@ class AgentExplorerService:
             logger.info(f"Getting explorer data for thread_id: {thread_id}, checkpoint_id: {checkpoint_id}")
             
             # Create config to get the state at specific checkpoint
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {"configurable": {"thread_id": thread_id, "checkpoint_id": checkpoint_id}}
             
             # Get the state from the agent
             state = self.agent.graph.get_state(config)
@@ -121,7 +121,7 @@ class AgentExplorerService:
             logger.info(f"Fetching steps for thread_id: {thread_id}, checkpoint_id: {checkpoint_id}")
             
             # Create config to get the state at specific checkpoint
-            config = {"configurable": {"thread_id": thread_id}}
+            config = {"configurable": {"thread_id": thread_id, "checkpoint_id": checkpoint_id}}
             
             # Get the state from the agent
             state = self.agent.graph.get_state(config)

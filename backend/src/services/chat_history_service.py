@@ -75,7 +75,6 @@ class ChatHistoryService:
                 return None
             
             messages = await self.get_thread_messages(thread_id)
-            print(f"Thread {thread_id}: messages = {messages}")
             return ChatThreadWithMessages(
                 thread_id=thread.thread_id,
                 title=thread.title,

@@ -32,12 +32,13 @@ export const ExplorerRenderer: React.FC<ExplorerRendererProps> = ({
     return parts.length > 0 ? parts.join(' • ') : 'Click to view analysis details';
   };
 
-  // Get the user's question - prioritize data.query, fallback to content
+  // Get the user's question - prioritize data.query, fallback to a default
   const getUserQuestion = () => {
     if (data?.query) {
       return data.query;
     }
-    return content || 'Analysis Complete';
+    // Don't use content as fallback since it contains the assistant's response
+    return 'Analysis Complete';
   };
 
   return (

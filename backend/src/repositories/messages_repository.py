@@ -43,12 +43,10 @@ class MessagesRepository(BaseRepository[ChatMessage]):
     
     async def get_last_message_by_thread(self, thread_id: str) -> Optional[ChatMessage]:
         try:
-            print(f"Searching for messages with thread_id: {thread_id}")
             document = await self.collection.find_one(
                 {"thread_id": thread_id},
                 sort=[("timestamp", -1)]  # Sort by timestamp descending
             )
-            print(f"Found document: {document}")
             if document:
                 document.pop('_id', None)
                 return self._to_entity(document)

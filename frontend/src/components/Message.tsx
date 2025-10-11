@@ -14,10 +14,15 @@ const Message: React.FC<MessageComponentProps> = ({
           (window as any).openExplorer(data);
         }
         break;
+      case 'openVisualization':
+        if ((window as any).openVisualization) {
+          (window as any).openVisualization(data);
+        }
+        break;
     }
   };
  
-  if (message.messageType === 'explorer') {
+  if (message.messageType === 'explorer' || message.messageType === 'visualization') {
     return (
       <div className="w-full mb-4">
         <MessageRenderer message={message} onAction={handleAction} />

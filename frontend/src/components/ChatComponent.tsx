@@ -77,6 +77,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   
   // Enhanced input state
   const [usePlanning, setUsePlanning] = useState<boolean>(true);
+  const [useExplainer, setUseExplainer] = useState<boolean>(true);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   
   // Tool call state for ephemeral indicators - now tracks step history
@@ -144,7 +145,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     if (!response.explorerData) return;
     
     const explorerMessage: MessageType = {
-      id: Date.now() + 100, // Ensure unique ID
+      id: Date.now() + Math.floor(Math.random() * 1000), // Ensure unique ID with random component
       role: 'assistant',
       content: response.message,
       timestamp: new Date(),
@@ -163,15 +164,31 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     }, 50);
   }, [contextThreadId, currentThreadId, onMessageCreated]);
 
-  // Helper function to handle response and create explorer message if needed
+  // Helper function to handle response and create special messages if needed
   const handleResponse = useCallback((response: HandlerResponse): string => {
-    // If response has explorer data, create explorer message using separate method
     if (response.explorerData) {
       createExplorerMessage(response);
     }
-    
+    if (response.visualizations && response.visualizations.length > 0) {
+      const vizMessage: MessageType = {
+        id: Date.now() + Math.floor(Math.random() * 1000) + 10000, // Ensure unique ID with different random component
+        role: 'assistant',
+        content: response.message,
+        timestamp: new Date(),
+        messageType: 'visualization',
+        checkpointId: response.checkpoint_id, // Add checkpoint ID for visualization messages
+        metadata: { visualizations: response.visualizations },
+        threadId: contextThreadId || currentThreadId || undefined
+      } as any;
+      setTimeout(() => {
+        setMessages(prev => [...prev, vizMessage]);
+        if (typeof onMessageCreated === 'function') {
+          onMessageCreated(vizMessage);
+        }
+      }, 50);
+    }
     return response.message;
-  }, [createExplorerMessage]);
+  }, [createExplorerMessage, contextThreadId, currentThreadId, onMessageCreated]);
 
 
 const appendToMessageContent = useCallback(
@@ -224,7 +241,7 @@ const appendToMessageContent = useCallback(
   }
 
     try {
-      const response = await onSendMessage(userMessage, messages, { usePlanning, attachedFiles });
+      const response = await onSendMessage(userMessage, messages, { usePlanning, useExplainer, attachedFiles });
       if (response.isStreaming && response.streamingHandler) {
         // Prepare a streaming assistant message
         const streamingMsgId = Date.now() + 1;
@@ -1057,6 +1074,10 @@ const appendToMessageContent = useCallback(
     setUsePlanning(enabled);
   };
 
+  const handleExplainerToggle = (enabled: boolean): void => {
+    setUseExplainer(enabled);
+  };
+
   return (
     <div className={`flex flex-col h-full min-h-0 overflow-hidden bg-white border border-gray-200 rounded-lg ${className}`}>
       {/* Header */}
@@ -1176,7 +1197,9 @@ const appendToMessageContent = useCallback(
             disabled={disabled}
             isLoading={isLoading}
             usePlanning={usePlanning}
+            useExplainer={useExplainer}
             onPlanningToggle={handlePlanningToggle}
+            onExplainerToggle={handleExplainerToggle}
             onFilesChange={handleFilesChange}
             attachedFiles={attachedFiles}
           />

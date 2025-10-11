@@ -33,6 +33,9 @@ export const API_ENDPOINTS = {
   STREAMING_GRAPH_RESUME: '/graph/stream/resume',
   STREAMING_GRAPH_STREAM: (threadId: string) => `/graph/stream/${threadId}`,
   STREAMING_GRAPH_RESULT: (threadId: string) => `/graph/stream/result/${threadId}`,
+  
+  // Visualization endpoints
+  VISUALIZATION_DATA: '/graph/visualization/data',
 } as const;
 
 // Helper function to build URLs

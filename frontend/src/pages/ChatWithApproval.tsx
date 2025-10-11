@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { ChatComponent, ExplorerPanel } from '../components';
+import { ChatComponent, ExplorerPanel, VisualizationPanel } from '../components';
 // import ChatThreadSelector from '../components/ChatThreadSelector'; // Commented for future use
 import Sidebar from '../components/Sidebar';
 import { Message, HandlerResponse } from '../types/chat';
 import { GraphService } from '../api/services/graphService';
 import { ExplorerService } from '../api/services/explorerService';
+import { VisualizationService } from '../api/services/visualizationService';
 import { ChatHistoryService } from '../api/services/chatHistoryService';
 import { useUIState } from '../contexts/UIStateContext';
 
@@ -24,6 +25,9 @@ const ChatWithApproval: React.FC = () => {
   const [explorerOpen, setExplorerOpen] = useState<boolean>(false);
   const [explorerData, setExplorerData] = useState<any | null>(null);
   const [loadingThread, setLoadingThread] = useState<boolean>(false);
+  // Visualization panel state
+  const [visualizationOpen, setVisualizationOpen] = useState<boolean>(false);
+  const [visualizationCharts, setVisualizationCharts] = useState<any[] | null>(null);
   const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false); // Sidebar state - starts closed
 
@@ -41,7 +45,7 @@ const ChatWithApproval: React.FC = () => {
       timestamp: new Date(msg.timestamp),
       needsApproval: false,
       threadId: selectedChatThreadId || undefined,
-      messageType: (msg.message_type as 'message' | 'explorer') || 'message',
+      messageType: msg.message_type as any,
       checkpointId: msg.checkpoint_id
     }));
   };
@@ -101,8 +105,115 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
+  const restoreDataIfNeeded = async (messages: Message[], threadId: string) => {
+    const explorerMessages = messages.filter(msg => 
+      msg.messageType === 'explorer' && 
+      msg.checkpointId && 
+      msg.role === 'assistant'
+    );
+
+    const visualizationMessages = messages.filter(msg => 
+      msg.messageType === 'visualization' && 
+      msg.role === 'assistant'
+    );
+
+    if (explorerMessages.length > 0 || visualizationMessages.length > 0) {
+      try {
+        const explorerDataMap = new Map();
+        const visualizationDataMap = new Map();
+        
+        // Restore explorer data
+        for (const explorerMessage of explorerMessages) {
+          try {
+            const explorerData = await ExplorerService.getExplorerData(
+              threadId,
+              explorerMessage.checkpointId!
+            );
+            
+            if (explorerData) {
+              explorerDataMap.set(explorerMessage.id, explorerData);
+            }
+          } catch (error) {
+            console.error('Failed to restore explorer data for checkpoint:', explorerMessage.checkpointId, error);
+          }
+        }
+        
+        for (const visualizationMessage of visualizationMessages) {
+          try {
+            const visualizationData = await VisualizationService.getVisualizationData(
+              threadId,
+              visualizationMessage.checkpointId || ''
+            );
+            if (visualizationData) {
+              visualizationDataMap.set(visualizationMessage.id, visualizationData.visualizations);
+            }
+          } catch (error) {
+            console.error('Failed to restore visualization data for checkpoint:', visualizationMessage.checkpointId, error);
+          }
+        }
+        
+        // Update messages with both types of data
+        const updatedMessages = messages.map(msg => {
+          let updatedMsg = { ...msg };
+          
+          if (msg.messageType === 'explorer' && explorerDataMap.has(msg.id)) {
+            const explorerData = explorerDataMap.get(msg.id);
+            updatedMsg = {
+              ...updatedMsg,
+              metadata: { 
+                ...updatedMsg.metadata,
+                explorerData 
+              }
+            };
+          }
+          
+          if (msg.messageType === 'visualization' && visualizationDataMap.has(msg.id)) {
+            const visualizations = visualizationDataMap.get(msg.id);
+            updatedMsg = {
+              ...updatedMsg,
+              metadata: { 
+                ...updatedMsg.metadata,
+                visualizations: visualizations
+              }
+            };
+          }
+          
+          return updatedMsg;
+        });
+        
+        setRestoredMessages(updatedMessages);
+        
+        // Set the latest explorer data
+        const lastExplorerMessage = explorerMessages[explorerMessages.length - 1];
+        if (lastExplorerMessage) {
+          const lastUpdatedMessage = updatedMessages.find(msg => msg.id === lastExplorerMessage.id);
+          if (lastUpdatedMessage?.metadata?.explorerData) {
+            setExplorerData(lastUpdatedMessage.metadata.explorerData);
+          }
+        }
+        
+        // Set the latest visualization data
+        const lastVisualizationMessage = visualizationMessages[visualizationMessages.length - 1];
+        if (lastVisualizationMessage) {
+          const lastUpdatedMessage = updatedMessages.find(msg => msg.id === lastVisualizationMessage.id);
+          if (lastUpdatedMessage?.metadata?.visualizations) {
+            setVisualizationCharts(lastUpdatedMessage.metadata.visualizations);
+          }
+        }
+        
+      } catch (error) {
+        console.error('Failed to restore data:', error);
+      }
+    } else {
+      setRestoredMessages(messages);
+    }
+  };
+
   const handleOpenExplorer = (data: any) => {
     if (data) {
+      // Ensure only one panel is open at a time
+      setVisualizationOpen(false);
+      setVisualizationCharts(null);
       setExplorerData(data);
       setExplorerOpen(true);
     }
@@ -119,7 +230,7 @@ const ChatWithApproval: React.FC = () => {
         thread_id: threadId,
         sender: msg.role,
         content: msg.content,
-        message_type: msg.messageType || 'message',
+        message_type: msg.messageType as any,
         checkpoint_id: msg.checkpointId || undefined,
         message_id: msg.id || undefined,
         needs_approval: msg.needsApproval || undefined,
@@ -140,8 +251,17 @@ const ChatWithApproval: React.FC = () => {
 
   React.useEffect(() => {
     (window as any).openExplorer = handleOpenExplorer;
+    (window as any).openVisualization = (charts: any[]) => {
+      if (charts && charts.length > 0) {
+        setExplorerOpen(false);
+        setExplorerData(null);
+        setVisualizationCharts(charts);
+        setVisualizationOpen(true);
+      }
+    };
     return () => {
       delete (window as any).openExplorer;
+      delete (window as any).openVisualization;
     };
   }, []);
 
@@ -177,13 +297,15 @@ const ChatWithApproval: React.FC = () => {
     chatThreadId: string,
     updateMessageCallback: (id: number, content: string) => void,
     onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void,
-    usePlanning: boolean = true
+    usePlanning: boolean = true,
+    useExplainer: boolean = true
   ): Promise<void> => {
     try {
       const startResponse = await GraphService.startStreamingGraph({
         human_request: messageContent,
         thread_id: chatThreadId,
-        use_planning: usePlanning
+        use_planning: usePlanning,
+        use_explainer: useExplainer
       });
 
       setThreadId(startResponse.thread_id);
@@ -263,16 +385,18 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (message: string, messageHistory: Message[], options?: { usePlanning?: boolean; attachedFiles?: File[] }): Promise<HandlerResponse> => {
+  const handleSendMessage = async (message: string, messageHistory: Message[], options?: { usePlanning?: boolean; useExplainer?: boolean; attachedFiles?: File[] }): Promise<HandlerResponse> => {
+    // Close any open panels at start
     setExplorerData(null);
     setExplorerOpen(false);
+    setVisualizationCharts(null);
+    setVisualizationOpen(false);
     setLoading(true);
     setExecutionStatus('running');
     
-    // Extract planning preference from options (defaults to true)
+    // Extract planning and explainer preferences from options (defaults to true)
     const usePlanning = options?.usePlanning ?? true;
-    
-    console.log('🔧 FRONTEND DEBUG: usePlanning =', usePlanning, 'options =', options);
+    const useExplainer = options?.useExplainer ?? true;
     
     try {
       
@@ -298,7 +422,8 @@ const ChatWithApproval: React.FC = () => {
         const response = await GraphService.startGraph({
           human_request: message,
           thread_id: chatThreadId,
-          use_planning: usePlanning
+          use_planning: usePlanning,
+          use_explainer: useExplainer
         });
         if (response.run_status === 'user_feedback') {
           setExecutionStatus('user_feedback');
@@ -316,19 +441,14 @@ const ChatWithApproval: React.FC = () => {
           setLoading(false);
           
           const assistantResponse = response.assistant_response || 'Task completed successfully.'
-          if (response.steps && response.steps.length > 0) {
-            // Explorer message will be stored automatically by ChatComponent via onMessageCreated
-            setExplorerData(response);
-            setExplorerOpen(true);
-            return {
-              message: assistantResponse,
-              explorerData: response
-            };
-          }
+          // Do not auto-open panels; allow clicking message card to open
           
           return {
             message: assistantResponse,
-            needsApproval: false
+            needsApproval: false,
+            checkpoint_id: response.checkpoint_id, // Add checkpoint ID for both explorer and visualization messages
+            ...(response.steps && response.steps.length > 0 ? { explorerData: response } : {}),
+            ...(response.visualizations && response.visualizations.length > 0 ? { visualizations: response.visualizations } : {})
           };
         } else if (response.run_status === 'error') {
           throw new Error(response.error || 'An error occurred while processing your request.');
@@ -351,7 +471,7 @@ const ChatWithApproval: React.FC = () => {
             updateMessageCallback: (id: number, content: string) => void,
             onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
           ) => {
-            await startStreamingForMessage(message, streamingMessageId, chatThreadId, updateMessageCallback, onStatus, usePlanning);
+            await startStreamingForMessage(message, streamingMessageId, chatThreadId, updateMessageCallback, onStatus, usePlanning, useExplainer);
           }
         };
       }
@@ -395,20 +515,14 @@ const ChatWithApproval: React.FC = () => {
             }
           }
           
-          if (selectedChatThreadId) {     
-            if (response.steps && response.steps.length > 0) {
-              setExplorerData(response);
-              setExplorerOpen(true);
-              return {
-                message: detailedResponse,
-                explorerData: response
-              };
-            }
-          }
+          // Do not auto-open panels; allow clicking message card to open
           
           return {
             message: detailedResponse,
-            needsApproval: false
+            needsApproval: false,
+            checkpoint_id: response.checkpoint_id, // Add checkpoint ID for both explorer and visualization messages
+            ...(response.steps && response.steps.length > 0 ? { explorerData: response } : {}),
+            ...(response.visualizations && response.visualizations.length > 0 ? { visualizations: response.visualizations } : {})
           };
           
         } else if (response.run_status === 'error') {
@@ -489,26 +603,14 @@ const ChatWithApproval: React.FC = () => {
             }
           }
           
-          if (selectedChatThreadId) {
-            // Message will be stored automatically by ChatComponent via onMessageCreated
-            
-            if (response.steps && response.steps.length > 0) {
-              // Explorer message will be stored automatically by ChatComponent via onMessageCreated
-              setExplorerData(response);
-              setExplorerOpen(true);
-            }
-          }
-          
-          if (response.steps && response.steps.length > 0) {
-            return {
-              message: detailedResponse,
-              explorerData: response
-            };
-          }
+          // Do not auto-open panels; allow clicking message card to open
           
           return {
             message: detailedResponse,
-            needsApproval: false
+            needsApproval: false,
+            checkpoint_id: response.checkpoint_id, // Add checkpoint ID for both explorer and visualization messages
+            ...(response.steps && response.steps.length > 0 ? { explorerData: response } : {}),
+            ...(response.visualizations && response.visualizations.length > 0 ? { visualizations: response.visualizations } : {})
           };
           
         } else if (response.run_status === 'error') {
@@ -642,8 +744,10 @@ const ChatWithApproval: React.FC = () => {
         setThreadId(null);
         setExplorerData(null);
         setExplorerOpen(false);
+        setVisualizationCharts(null);
+        setVisualizationOpen(false);
         
-        await restoreExplorerDataIfNeeded(convertedMessages, threadId);
+        await restoreDataIfNeeded(convertedMessages, threadId);
         setChatKey(prev => prev + 1);
       } else {
         setRestoredMessages([]);
@@ -651,6 +755,8 @@ const ChatWithApproval: React.FC = () => {
         setThreadId(null);
         setExplorerData(null);
         setExplorerOpen(false);
+        setVisualizationCharts(null);
+        setVisualizationOpen(false);
       }
     } catch (error) {
       console.error('Error selecting thread:', error);
@@ -668,6 +774,8 @@ const ChatWithApproval: React.FC = () => {
     setThreadId(null);
     setExplorerData(null);
     setExplorerOpen(false);
+    setVisualizationCharts(null);
+    setVisualizationOpen(false);
   };
 
   return (
@@ -752,8 +860,9 @@ const ChatWithApproval: React.FC = () => {
           </div>
         </div>
         
-        {/* Slide-out Explorer Panel */}
-        <ExplorerPanel open={explorerOpen} onClose={() => setExplorerOpen(false)} data={explorerData} />
+        {/* Slide-out Panels (mutually exclusive) */}
+        <ExplorerPanel open={explorerOpen && !visualizationOpen} onClose={() => setExplorerOpen(false)} data={explorerData} />
+        <VisualizationPanel open={visualizationOpen && !explorerOpen} onClose={() => setVisualizationOpen(false)} charts={visualizationCharts || []} />
       </div>
     </div>
   );
