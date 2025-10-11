@@ -22,13 +22,13 @@ class StepExplanation(BaseModel):
     """Model for individual step explanations"""
     id: int
     type: str
-    decision: str
-    reasoning: str
     input: str
     output: str
-    confidence: float
-    why_chosen: str
     timestamp: str
+    decision: Optional[str] = None
+    reasoning: Optional[str] = None
+    confidence: Optional[float] = None
+    why_chosen: Optional[str] = None
 
 
 class AgentInfo(BaseModel):
@@ -86,6 +86,7 @@ class StartRequest(BaseModel):
     human_request: str = Field(..., min_length=1, max_length=1000, description="User request to process")
     thread_id: Optional[str] = Field(None, description="Optional thread ID for existing conversations")
     use_planning: bool = Field(True, description="Whether to use planning in agent execution")
+    use_explainer: bool = Field(True, description="Whether to use explainer node for step explanations")
     agent_type: str = Field("assistant", description="Type of agent to use: 'assistant' (routes to appropriate agent) or 'explainable' (direct to explainable agent)")
 
 
@@ -112,7 +113,7 @@ class GraphResponse(BaseModel):
     total_time: Optional[float] = Field(None, description="Total execution time if completed")
     overall_confidence: Optional[float] = Field(None, description="Overall confidence score if completed")
     response_type: Optional[str] = Field(None, description="Type of response: 'answer' for clarifications, 'replan' for new plans, 'cancel' for cancellations")
-
+    visualizations: Optional[List[Dict[str, Any]]] = Field(None, description="Visualizations if completed")
 
 class GraphStatusResponse(BaseModel):
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Send, Plus, X, Upload, File, Image, FileText, FileCode, Zap } from 'lucide-react';
+import { Send, Plus, X, Upload, File, Image, FileText, FileCode, Zap, Brain } from 'lucide-react';
 import { useUIState } from '../contexts/UIStateContext';
 
 interface EnhancedInputProps {
@@ -11,7 +11,9 @@ interface EnhancedInputProps {
   disabled?: boolean;
   isLoading?: boolean;
   usePlanning?: boolean;
+  useExplainer?: boolean;
   onPlanningToggle?: (enabled: boolean) => void;
+  onExplainerToggle?: (enabled: boolean) => void;
   onFilesChange?: (files: File[]) => void;
   attachedFiles?: File[];
 }
@@ -25,7 +27,9 @@ const EnhancedInput: React.FC<EnhancedInputProps> = ({
   disabled = false,
   isLoading = false,
   usePlanning = false,
+  useExplainer = false,
   onPlanningToggle,
+  onExplainerToggle,
   onFilesChange,
   attachedFiles = []
 }) => {
@@ -35,6 +39,7 @@ const EnhancedInput: React.FC<EnhancedInputProps> = ({
   // Get streaming state from context
   const { state, setUseStreaming } = useUIState();
   const useStreaming = state.useStreaming;
+ 
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(e.target.files || []);
@@ -52,6 +57,12 @@ const EnhancedInput: React.FC<EnhancedInputProps> = ({
   const togglePlanning = (): void => {
     if (onPlanningToggle) {
       onPlanningToggle(!usePlanning);
+    }
+  };
+
+  const toggleExplainer = (): void => {
+    if (onExplainerToggle) {
+      onExplainerToggle(!useExplainer);
     }
   };
 
@@ -83,7 +94,7 @@ const EnhancedInput: React.FC<EnhancedInputProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={togglePlanning}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors h-7 w-26 ${
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors h-7 w-26 ${
                 usePlanning 
                   ? 'bg-blue-100 text-blue-700 border border-blue-200' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -94,8 +105,20 @@ const EnhancedInput: React.FC<EnhancedInputProps> = ({
             </button>
             
             <button
+              onClick={toggleExplainer}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors h-7 w-28 ${
+                useExplainer 
+                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' 
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              <Brain className="w-3 h-3" />
+              {useExplainer ? 'Explainer On' : 'Explainer Off'}
+            </button>
+            
+            <button
               onClick={() => setUseStreaming(!useStreaming)}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors h-7 w-28 ${
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors h-7 w-28 ${
                 useStreaming 
                   ? 'bg-purple-100 text-purple-700 border border-purple-200' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -107,7 +130,7 @@ const EnhancedInput: React.FC<EnhancedInputProps> = ({
             
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-xs h-7 w-20 bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs h-7 w-20 bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
             >
               <Upload className="w-3 h-3" />
               Upload

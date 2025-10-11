@@ -27,7 +27,6 @@ class SupabaseAuth:
         try:
             # For development, skip signature verification
             if self.environment == "development":
-                logger.debug("Development mode: skipping JWT signature verification")
                 payload = jwt.decode(token, options={"verify_signature": False})
                 return payload
             
@@ -45,7 +44,6 @@ class SupabaseAuth:
                 audience="authenticated"
             )
             
-            logger.debug(f"Token verified for user: {payload.get('email')}")
             return payload
             
         except jwt.ExpiredSignatureError:

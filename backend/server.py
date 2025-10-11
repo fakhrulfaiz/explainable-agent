@@ -14,7 +14,7 @@ from src.models.config import settings
 from src.models.schemas import QueryRequest, QueryResponse
 from src.services.explainable_agent import ExplainableAgent
 
-from routers import graph, test_stream, chat_history, explorer, llm, streaming_graph
+from routers import graph, test_stream, chat_history, explorer, llm, streaming_graph, visualization
 from src.models.database import mongodb_manager, get_mongodb
 from routers.chat_history import get_chat_history_service
 from src.middleware.auth import get_current_user, get_optional_user
@@ -121,6 +121,7 @@ app.include_router(streaming_graph.router)
 app.include_router(test_stream.router)
 app.include_router(chat_history.router)
 app.include_router(explorer.router)
+app.include_router(visualization.router)
 
 # Include LLM router  
 from routers import llm
@@ -158,92 +159,7 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
 
-@app.get("/test-logs")
-async def test_logs():
-    """Test endpoint to verify logging is working"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    logger.info("Test log message - INFO level")
-    logger.warning("Test log message - WARNING level")
-    logger.error("Test log message - ERROR level")
-    
-    # Also test service loggers
-    chat_logger = logging.getLogger("src.services.chat_history_service")
-    checkpoint_logger = logging.getLogger("src.services.checkpoint_service")
-    
-    chat_logger.info("Chat service test log")
-    checkpoint_logger.info("Checkpoint service test log")
-    
-    return {"message": "Test logs sent - check your docker logs!"}
 
-@app.get("/debug/thread/{thread_id}")
-async def debug_thread(thread_id: str, chat_service = Depends(get_chat_history_service)):
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        # Check if thread exists
-        thread = await chat_service.get_thread(thread_id)
-        
-        if thread:
-            logger.info(f"DEBUG: Thread {thread_id} exists in database")
-            return {
-                "exists": True,
-                "thread_id": thread.thread_id,
-                "title": thread.title,
-                "message_count": len(thread.messages),
-                "created_at": thread.created_at,
-                "updated_at": thread.updated_at
-            }
-        else:
-            logger.info(f"DEBUG: Thread {thread_id} not found in database")
-            return {"exists": False, "thread_id": thread_id}
-            
-    except Exception as e:
-        logger.error(f"DEBUG: Error checking thread {thread_id}: {e}")
-        return {"error": str(e), "thread_id": thread_id}
-
-@app.get("/debug/checkpoints/{thread_id}")
-async def debug_checkpoints(thread_id: str, db = Depends(get_mongodb)):
-    """Debug endpoint to check checkpoint data for a thread"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        # Access checkpoint collections with dots in their names within explainable_agent_db
-        checkpoint_writes_collection = db["checkpointing_db.checkpoint_writes"]
-        checkpoints_collection = db["checkpointing_db.checkpoints"]
-        
-        # Check checkpoint writes
-        writes = list(checkpoint_writes_collection.find({"thread_id": thread_id}))
-        logger.info(f"DEBUG: Found {len(writes)} checkpoint writes for thread {thread_id}")
-        
-        # Check checkpoints
-        checkpoints = list(checkpoints_collection.find({"thread_id": thread_id}))
-        logger.info(f"DEBUG: Found {len(checkpoints)} checkpoints for thread {thread_id}")
-        
-        # Convert ObjectId to string for JSON serialization
-        for write in writes:
-            write["_id"] = str(write["_id"])
-        for checkpoint in checkpoints:
-            checkpoint["_id"] = str(checkpoint["_id"])
-        
-        return {
-            "thread_id": thread_id,
-            "checkpoint_writes": {
-                "count": len(writes),
-                "data": writes[:5]  # Show first 5 for debugging
-            },
-            "checkpoints": {
-                "count": len(checkpoints),
-                "data": checkpoints[:5]  # Show first 5 for debugging
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"DEBUG: Error checking checkpoint data for thread {thread_id}: {e}")
-        return {"error": str(e), "thread_id": thread_id}
 
 
 if __name__ == "__main__":

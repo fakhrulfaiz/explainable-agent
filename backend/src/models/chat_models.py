@@ -10,7 +10,7 @@ class ChatMessage(BaseModel):
     sender: Literal["user", "assistant"] = Field(..., description="Message sender")
     content: str = Field(..., description="Message content")
     timestamp: datetime = Field(default_factory=datetime.now, description="Message timestamp")
-    message_type: Literal["message", "explorer"] = Field(default="message", description="Message type - message or explorer")
+    message_type: Literal["message", "explorer", "visualization"] = Field(default="message", description="Message type - message, explorer, visualization")
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
     
     # Additional fields from frontend Message interface
@@ -76,7 +76,7 @@ class AddMessageRequest(BaseModel):
     thread_id: str = Field(..., description="Thread ID")
     sender: Literal["user", "assistant"] = Field(..., description="Message sender")
     content: str = Field(..., description="Message content")
-    message_type: Literal["message", "explorer"] = Field(default="message", description="Message type - message or explorer")
+    message_type: Literal["message", "explorer", "visualization"] = Field(default="message", description="Message type - message, explorer, visualization")
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
     
     # Additional fields from frontend Message interface

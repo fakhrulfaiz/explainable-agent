@@ -74,35 +74,43 @@ async def switch_llm(
         new_llm = llm_service.get_current_llm()
         app_request.app.state.llm = new_llm
         
-        # Recreate agents with new LLM
+        # Update existing agent with new LLM
         try:
-            # Import mongodb_manager to get the proper mongo_memory instance
-            from src.models.database import mongodb_manager
+            # Get the existing agent from app state
+            existing_agent = app_request.app.state.explainable_agent
             
-            # Get MongoDB memory from the manager (same as server startup)
-            mongo_memory = mongodb_manager.get_mongo_memory()
+            if existing_agent:
+                # Update the existing agent with the new LLM
+                success = existing_agent.update_llm(new_llm)
+                
+                if not success:
+                    result['warning'] = "LLM switched but agent update failed - agent may use old LLM"
+                    result['status'] = 'warning'
+            else:
+                # Fallback: create new agent if none exists
+                from src.models.database import mongodb_manager
+                mongo_memory = mongodb_manager.get_mongo_memory()
+                
+                explainable_agent = ExplainableAgent(
+                    llm=new_llm,
+                    db_path=settings.database_path,
+                    logs_dir=settings.logs_dir,
+                    mongo_memory=mongo_memory
+                )
+                
+                app_request.app.state.explainable_agent = explainable_agent
             
-            # Create new agent instances
-            explainable_agent = ExplainableAgent(
-                llm=new_llm,
-                db_path=settings.database_path,
-                logs_dir=settings.logs_dir,
-                mongo_memory=mongo_memory
-            )
-            
-            app_request.app.state.explainable_agent = explainable_agent
-       
-            logger.info(f"Successfully updated all agents with new LLM: {request.provider} - {request.model}")
+            # Update the LLM service in app state
+            app_request.app.state.llm_service = llm_service
             
         except Exception as e:
-            logger.error(f"Failed to recreate agents: {e}")
-            # Don't fail the switch if agent recreation fails
-            result['warning'] = f"LLM switched but agent recreation failed: {str(e)}"
+            # Don't fail the switch if agent update fails, but warn the user
+            result['warning'] = f"LLM switched but agent update failed: {str(e)}"
+            result['status'] = 'warning'
         
         return result
         
     except Exception as e:
-        logger.error(f"LLM switch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/test")
@@ -146,4 +154,5 @@ async def get_providers(
             result[provider]['config_keys'] = ['groq_api_key']
     
     return result
+
 

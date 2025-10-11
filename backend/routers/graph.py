@@ -1,3 +1,4 @@
+from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from uuid import uuid4
@@ -6,7 +7,6 @@ from typing import Annotated
 import logging
 import json
 import asyncio
-
 from src.models.schemas import StartRequest, GraphResponse, GraphStatusResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
 from src.services.explainable_agent import ExplainableAgent, ExplainableAgentState
@@ -102,7 +102,7 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
         
             steps = final_values.get("steps", [])
             plan = final_values.get("plan", "")
-            
+            visualizations = _normalize_visualizations(final_values.get("visualizations", []))
             total_time = None
             overall_confidence = None
             final_result = None
@@ -132,7 +132,8 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                 steps=steps,
                 final_result=final_result,
                 total_time=total_time,
-                overall_confidence=overall_confidence
+                overall_confidence=overall_confidence,
+                visualizations=visualizations
             )
             
     except Exception as e:
@@ -146,6 +147,26 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             error=error_message
         )
 
+
+def _normalize_visualizations(visualizations: Any) -> List[Dict[str, Any]]:
+    try:
+        import json
+        if not visualizations:
+            return []
+        normalized: List[Dict[str, Any]] = []
+        for v in visualizations:
+            if isinstance(v, str):
+                try:
+                    parsed = json.loads(v)
+                    if isinstance(parsed, dict):
+                        normalized.append(parsed)
+                except Exception:
+                    continue
+            elif isinstance(v, dict):
+                normalized.append(v)
+        return normalized
+    except Exception:
+        return []
 
 @router.post("/start", response_model=GraphResponse)
 def start_graph(
@@ -167,8 +188,10 @@ def start_graph(
             status="approved",
             assistant_response="",
             use_planning=request.use_planning,  # Set planning preference from API
+            use_explainer=request.use_explainer,  # Set explainer preference from API
             agent_type="data_exploration_agent",  # Skip assistant node, go directly to data exploration
-            routing_reason="Direct routing to data exploration agent"  # Skip assistant node
+            routing_reason="Direct routing to data exploration agent",  # Skip assistant node
+            visualizations=[]
         )
         
         
@@ -399,6 +422,7 @@ async def start_graph_stream(
                 status="approved",
                 assistant_response="",
                 use_planning=request.use_planning,
+                use_explainer=request.use_explainer,
                 agent_type="data_exploration_agent",
                 routing_reason=""
             )

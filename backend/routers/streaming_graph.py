@@ -34,6 +34,7 @@ def create_graph_streaming(request: StartRequest):
         "type": "start",
         "human_request": request.human_request,
         "use_planning": request.use_planning,
+        "use_explainer": request.use_explainer,
         "agent_type": request.agent_type
     }
     
@@ -89,7 +90,9 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
             step_counter=0,
             status="approved",
             use_planning=use_planning_value,
-            agent_type=run_data.get("agent_type", "assistant")
+            use_explainer=run_data.get("use_explainer", True),
+            agent_type=run_data.get("agent_type", "assistant"),
+            visualizations=[]
         )
         input_state = initial_state
     else:

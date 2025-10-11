@@ -89,7 +89,6 @@ class LLMFactory:
                 'kwargs': kwargs
             }
             
-            logger.info(f"🔄 Successfully switched to {provider} - {model}")
             return {
                 'status': 'success',
                 'provider': provider,

@@ -17,6 +17,7 @@ import os
 from datetime import datetime
 from pydantic import BaseModel, Field
 from src.models.database import get_mongo_memory
+from src.tools.custom_toolkit import CustomToolkit
 try:
     from explainer import Explainer
     from nodes.planner_node import PlannerNode
@@ -33,11 +34,11 @@ class ExplainableAgentState(MessagesState):
     status: Literal["approved", "feedback", "cancelled"]
     assistant_response: str
     use_planning: bool = True  # Planning preference from API
+    use_explainer: bool = True  # Whether to use explainer node
     response_type: Optional[Literal["answer", "replan", "cancel"]] = None  # Type of response from planner
-    
-    # Agent routing information
     agent_type: str = "data_exploration_agent"  # Which specialized agent to use
     routing_reason: str = ""  # Why this agent was chosen
+    visualizations: Optional[List[Dict[str, Any]]] = []
 
 
 class ExplainableAgent:
@@ -49,7 +50,14 @@ class ExplainableAgent:
         self.engine = create_engine(f'sqlite:///{db_path}')
         self.db = SQLDatabase(self.engine)
         self.toolkit = SQLDatabaseToolkit(db=self.db, llm=self.llm)
-        self.tools = self.toolkit.get_tools()
+        self.sql_tools = self.toolkit.get_tools()
+        
+        # Create custom toolkit with LLM
+        self.custom_toolkit = CustomToolkit(llm=self.llm)
+        self.custom_tools = self.custom_toolkit.get_tools()
+        
+        # Combine all tools
+        self.tools = self.sql_tools + self.custom_tools
         self.explainer = Explainer(llm)
         self.planner = PlannerNode(llm, self.tools)
         self.logs_dir = logs_dir or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
@@ -85,19 +93,22 @@ class ExplainableAgent:
         
         # Store use_planning value for tools to access
         self._use_planning = None
+        self._use_explainer = None
         
         def assistant_agent(state):
             use_planning = state.get("use_planning", True)
+            use_explainer = state.get("use_explainer", True)
             agent_type = state.get("agent_type", "data_exploration_agent")
             query = state.get("query", "")
             
             # Store use_planning value for tools to access
             self._use_planning = use_planning
-            
+            self._use_explainer = use_explainer
             result = base_assistant_agent.invoke(state)
             
             if isinstance(result, dict):
                 result["use_planning"] = use_planning
+                result["use_explainer"] = use_explainer
                 result["agent_type"] = agent_type
                 result["query"] = query
             
@@ -107,6 +118,7 @@ class ExplainableAgent:
         
         # Create the graph
         self.graph = self.create_graph()
+    
     
     def create_handoff_tools(self):
         """Create handoff tools for the assistant to transfer to specialized agents"""
@@ -140,6 +152,11 @@ class ExplainableAgent:
             if use_planning is None:
                 use_planning = state.get("use_planning", True)
             
+            # Get use_explainer value from state
+            use_explainer = self._use_explainer
+            if use_explainer is None:
+                use_explainer = state.get("use_explainer", True)
+            
             update_state = {
                 "messages": state.get("messages", []) + [tool_message],
                 "agent_type": "data_exploration_agent",
@@ -151,7 +168,9 @@ class ExplainableAgent:
                 "human_comment": state.get("human_comment"),
                 "status": state.get("status", "approved"),
                 "assistant_response": state.get("assistant_response", ""),
-                "use_planning": use_planning
+                "use_planning": use_planning,
+                "use_explainer": use_explainer,
+                "visualizations": state.get("visualizations", [])
             }
             
             
@@ -192,6 +211,11 @@ class ExplainableAgent:
             if use_planning is None:
                 use_planning = state.get("use_planning", True)
             
+            # Get use_explainer value from state
+            use_explainer = self._use_explainer
+            if use_explainer is None:
+                use_explainer = state.get("use_explainer", True)
+            
             update_state = {
                 "messages": state.get("messages", []) + [tool_message],
                 "agent_type": "general_agent",
@@ -203,7 +227,9 @@ class ExplainableAgent:
                 "human_comment": state.get("human_comment"),
                 "status": state.get("status", "approved"),
                 "assistant_response": state.get("assistant_response", ""),
-                "use_planning": use_planning
+                "use_planning": use_planning,
+                "use_explainer": use_explainer,
+                "visualizations": state.get("visualizations", [])
             }
             
             return Command(
@@ -268,7 +294,14 @@ class ExplainableAgent:
                 "end": END
             }
         )
-        graph.add_edge("tools", "explain")
+        graph.add_conditional_edges(
+            "tools",
+            self.should_explain,
+            {
+                "explain": "explain",
+                "agent": "agent"
+            }
+        )
         graph.add_edge("explain", "agent")
         
         # Add memory checkpointer for interrupt functionality
@@ -286,7 +319,6 @@ class ExplainableAgent:
         agent_type = state.get("agent_type", "data_exploration_agent")
         use_planning = state.get("use_planning", True)
         
-        # Currently only data_exploration_agent is implemented
         if agent_type == "data_exploration_agent":
             if use_planning:
                 return "planner"  # Go through planning first
@@ -323,6 +355,15 @@ class ExplainableAgent:
         else:
             return "end"  # End the conversation after agent completes
     
+    def should_explain(self, state: ExplainableAgentState):
+        """Determine whether to use explainer node based on use_explainer flag"""
+        use_explainer = state.get("use_explainer", True)
+        
+        if use_explainer:
+            return "explain"
+        else:
+            return "agent"  # Skip explainer and go directly back to agent
+    
     def agent_node(self, state: ExplainableAgentState):
         """Agent reasoning node"""
         messages = state["messages"]
@@ -336,11 +377,69 @@ class ExplainableAgent:
 You are a concise SQL database assistant. Answer only what is asked, nothing more.
 - If user asks what tables exist, just list the tables
 - If user asks for data, return the data in markdown table format when appropriate
+- ONLY use smart_transform_for_viz tool when the user EXPLICITLY asks for a chart, graph, or visualization
+- If user asks for multiple charts, call smart_transform_for_viz multiple times with different viz_type parameters, strictly only use supported types.
+- Supported types: bar, line, pie
+- If user didn not specify a viz_type, decide the most appropriate type based on the data and context.
+
+For pie charts, analyze the data and context to choose the most appropriate variant:
+- 'simple': Basic categorical proportions (e.g., "Show product categories distribution")
+- 'donut': When emphasizing totals or adding center text (e.g., "Show sales by department with total in center")
+- 'two-level': For hierarchical data (e.g., "Show Yes/No responses with subcategories")
+- 'straight-angle': For precise proportion comparisons (e.g., "Compare market shares precisely")
+
+Consider these factors when choosing pie variants:
+1. Data structure (hierarchical, flat, nested)
+2. User's intent (comparison, exploration, overview)
+3. Number of categories (too many categories might need grouping)
+
+- Do NOT use smart_transform_for_viz for regular data queries - just return markdown tables
 - Use tools only when necessary to answer the specific question
-- For images, use markdown format: ![Alt text](image_url)
+- NEVER generate images or base64 image data (no data:image/png;base64,...). Do not include markdown image tags for charts.
+- For images referenced by the user (not charts) or urls from database, use markdown format: ![Alt text](image_url)
 - For tabular data, format as markdown tables with proper headers and alignment
-- Give explaination but be direct and brief - no unnecessary explanations or extra tool calls
-- Follow the plan strictly if one exists."""
+- Give explanation but be direct and brief - no unnecessary explanations or extra tool calls
+- If you cant find any tables or columns, say so, stop the tool calling and provide information. Do not make up data.
+- IMPORTANT: Do NOT call the same tool with same arguments multiple times. Call each tool only once per response.
+- IMPORTANT: Only use smart_transform_for_viz tool when user specifically requests a visualization/chart
+- IMPORTANT: Do not generate any images or base64 data for visualizations - only use the smart_transform_for_viz tool to return a JSON spec for the frontend renderer.
+- If you accidentally produced an image or base64 output, remove it and instead produce a concise textual summary.
+- Follow the plan strictly if one exists.
+
+Examples (Visualization requests):
+
+Bar Chart Example:
+User: "Show a bar chart of the top 5 actors by film count"
+Assistant (good):
+1) Provide a one-paragraph summary of findings (no images)
+2) Call smart_transform_for_viz with raw_data, columns, and viz_type='bar'
+3) Just brief explanation
+
+Pie Chart Examples:
+1. Simple Pie Chart:
+User: "Show me the distribution of film ratings"
+Assistant (good):
+1) Brief summary of rating distribution
+2) Call smart_transform_for_viz with:
+   - viz_type='pie'
+   - config.variant='simple'
+
+
+2. Two-Level Pie:
+User: "Show rental status (returned/not returned) with breakdown by store"
+Assistant (good):
+1) Brief summary of rental status
+2) Call smart_transform_for_viz with:
+   - viz_type='pie'
+   - config.variant='two-level'
+   - Organize data into inner (status) and outer (store) rings
+
+
+Bad Examples (Do NOT do):
+- "![Chart](data:image/png;base64,...)"  (No base64 images)
+- Calling visualization tool without explicit request
+- Using unsupported chart types
+"""
 
         # Bind tools to LLM so it can call them
         llm_with_tools = self.llm.bind_tools(self.tools)
@@ -427,10 +526,26 @@ Guidelines:
                     "timestamp": datetime.now().isoformat()
                 }
                 
+                # Add explanation fields with default values when explainer is disabled
+                use_explainer = state.get("use_explainer", True)
+                if not use_explainer:
+                    step_info.update({
+                        "decision": f"Execute {tool_call['name']} tool",
+                        "reasoning": f"Used {tool_call['name']} to process the query",
+                        "confidence": 0.8,
+                        "why_chosen": f"Selected {tool_call['name']} as the appropriate tool"
+                    })
+                
                 steps.append(step_info)
+                
+                if tool_call['name'] == "smart_transform_for_viz":
+                    try:
+                        viz_dict = json.loads(tool_output)
+                        state["visualizations"].append(viz_dict)
+                    except json.JSONDecodeError:
+                        print(f"Failed to parse visualization output: {tool_output}")
+                        state["visualizations"].append({"error": "Invalid JSON output"})
 
-                import time
-                time.sleep(2)  # 2 second delay
         return {
             "messages": result["messages"],
             "steps": steps,
@@ -520,115 +635,88 @@ Guidelines:
         events = list(self.graph.stream(None, config, stream_mode="values"))
         return events
 
-    def process_query(self, user_query: str):
-        """Process a user query using the explainable agent with explanations"""
+    def update_llm(self, new_llm):
+        """Update the LLM for this agent and all its components"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Log if using Ollama
+        if hasattr(new_llm, 'model') and 'ollama' in str(type(new_llm)).lower():
+            logger.info("Using Ollama LLM - no special fallbacks applied")
+        
         try:
-            start_time = datetime.now()
+            # Update the main LLM
+            self.llm = new_llm
             
-            initial_state = ExplainableAgentState(
-                messages=[HumanMessage(content=user_query)],
-                query=user_query,
-                plan="",  # Will be filled by planner node
-                steps=[],
-                step_counter=0,
-                status="approved",  # Default to approved for initial run
-                assistant_response="",
-                use_planning=True,  # Default to planning enabled
-                agent_type="data_exploration_agent",  # Default agent type
-                routing_reason=""  # Will be filled by assistant node
+            # Update toolkit with new LLM
+            self.toolkit = SQLDatabaseToolkit(db=self.db, llm=new_llm)
+            self.sql_tools = self.toolkit.get_tools()
+            
+            # Update custom toolkit with new LLM
+            self.custom_toolkit = CustomToolkit(llm=new_llm)
+            self.custom_tools = self.custom_toolkit.get_tools()
+            
+            # Update combined tools
+            self.tools = self.sql_tools + self.custom_tools
+            
+            # Update explainer with new LLM
+            self.explainer = Explainer(new_llm)
+            
+            # Update planner with new LLM and tools
+            self.planner = PlannerNode(new_llm, self.tools)
+            
+            # Recreate the assistant agent with new LLM
+            base_assistant_agent = create_react_agent(
+                model=new_llm,
+                tools=[self.transfer_to_data_exploration, self.transfer_to_general_agent],
+                prompt=(
+                    "You are an assistant that routes tasks to specialized agents.\n\n"
+                    "AVAILABLE AGENTS:\n"
+                    "- data_exploration_agent: Handles database queries, SQL analysis, and data exploration\n"
+                    "  Use this for: SQL queries, database analysis, table inspection, data queries, schema questions\n\n"
+                    "- general_agent: Handles general questions, conversations, and any other tasks\n"
+                    "  Use this for: general questions, conversations, explanations, help, or anything not database-related\n\n"
+                    "FUTURE AGENTS (planned):\n"
+                    "- explainer_agent: Explains concepts, processes, code, or any topic to users\n"
+                    "  Will be used for: explanations, tutorials, concept clarification, how-to questions\n\n"
+                    "INSTRUCTIONS:\n"
+                    "- Analyze the user's request and determine which specialized agent should handle it\n"
+                    "- For database/SQL related queries, use transfer_to_data_exploration\n"
+                    "- For general questions, conversations, or anything else, use transfer_to_general_agent\n"
+                    "- Be helpful and direct in your routing decisions\n"
+                    "- IMPORTANT: Only route to agents when you receive a NEW user message, not for agent responses\n"
+                ),
+                name="assistant"
             )
             
-         
-            config = {"configurable": {"thread_id": "main_thread"}}
-            events = list(self.graph.stream(initial_state, config, stream_mode="values"))
-            
-            # Check if we hit an interrupt
-            current_state = self.graph.get_state(config)
-            if current_state.next:  # If there are pending nodes, we hit an interrupt
-                # Get the current state for display
-                state_values = current_state.values
+            # Update the assistant agent function
+            def assistant_agent(state):
+                use_planning = state.get("use_planning", True)
+                use_explainer = state.get("use_explainer", True)
+                agent_type = state.get("agent_type", "data_exploration_agent")
+                query = state.get("query", "")
                 
-                return {
-                    "success": True,
-                    "interrupted": True,
-                    "plan": state_values.get("plan", ""),
-                    "state": current_state,
-                    "config": config,
-                    "message": "Execution interrupted for human feedback. Use approve_and_continue() or continue_with_feedback() to proceed."
-                }
+                # Store use_planning value for tools to access
+                self._use_planning = use_planning
+                self._use_explainer = use_explainer
+                result = base_assistant_agent.invoke(state)
+                
+                if isinstance(result, dict):
+                    result["use_planning"] = use_planning
+                    result["use_explainer"] = use_explainer
+                    result["agent_type"] = agent_type
+                    result["query"] = query
+                
+                return result
             
-            # Get final state
-            final_state = events[-1] if events else initial_state
-            steps = final_state.get("steps", [])
+            self.assistant_agent = assistant_agent
             
-            # Extract final answer
-            final_answer = ""
-            if events and "messages" in events[-1]:
-                for msg in reversed(events[-1]["messages"]):
-                    if (hasattr(msg, 'content') and msg.content and 
-                        type(msg).__name__ == 'AIMessage' and
-                        (not hasattr(msg, 'tool_calls') or not msg.tool_calls)):
-                        final_answer = msg.content
-                        break
+            # Recreate the graph with updated components
+            self.graph = self.create_graph()
             
-            # Get final explanation
-            final_explanation = self.explainer.explain_final_result(
-                steps, final_answer, user_query
-            )
-            
-            # Add final result step
-            if final_answer:
-                final_step = {
-                    "id": len(steps) + 1,
-                    "type": "final_result",
-                    "decision": "Generated final structured answer",
-                    "reasoning": "Synthesized all previous steps into a comprehensive final answer",
-                    "input": "All previous step results and agent final message",
-                    "output": json.dumps(final_explanation.model_dump(), indent=2),
-                    "confidence": final_explanation.confidence,
-                    "why_chosen": "Required for structured output format",
-                    "timestamp": datetime.now().isoformat()
-                }
-                steps.append(final_step)
-            
-            # Calculate total time
-            end_time = datetime.now()
-            total_time = (end_time - start_time).total_seconds()
-            
-            # Calculate overall confidence
-            confidences = [step.get("confidence", 0.8) for step in steps if "confidence" in step]
-            overall_confidence = sum(confidences) / len(confidences) if confidences else 0.8
-            
-            # Get the plan from final state
-            final_plan = final_state.get("plan", "No plan available")
-            
-            # Create structured log
-            structured_log = {
-                "question": user_query,
-                "plan": final_plan,
-                "steps": steps,
-                "final_structured_result": final_explanation.model_dump(),
-                "total_time": total_time,
-                "overall_confidence": overall_confidence
-            }
-            
-            # Save log
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = os.path.join(self.logs_dir, f"explainable_agent_interaction_{timestamp}.json")
-            with open(log_file, 'w', encoding='utf-8') as f:
-                json.dump(structured_log, f, indent=2, ensure_ascii=False)
-            
-            return {
-                "success": True,
-                "response": final_answer if final_answer else "No clear response generated",
-                "structured_log": structured_log,
-                "log_file": log_file,
-                "events": events
-            }
+            return True
             
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
-            }
+            return False
+
+    
