@@ -132,4 +132,28 @@ export class ChatHistoryService {
       throw new Error(response.message || 'Failed to delete chat thread');
     }
   }
+
+  /**
+   * Update message flags (e.g., approval) persistently
+   */
+  static async updateMessageFlags(threadId: string, params: {
+    message_id: number;
+    needs_approval?: boolean;
+    approved?: boolean;
+    disapproved?: boolean;
+    is_error?: boolean;
+    is_feedback?: boolean;
+    has_timed_out?: boolean;
+    can_retry?: boolean;
+    retry_action?: 'approve' | 'feedback' | 'cancel';
+  }): Promise<{ success: boolean; message: string; updated_message?: any }> {
+    const response = await this.client.put<{ success: boolean; message: string; updated_message?: any }>(
+      `/chat-history/thread/${threadId}/message/flags`,
+      params
+    );
+    if (!response.success) {
+      throw new Error(response.message || 'Failed to update message flags');
+    }
+    return response;
+  }
 }

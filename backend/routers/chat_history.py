@@ -9,6 +9,7 @@ from src.models.chat_models import (
     AddMessageRequest,
     ChatThread
 )
+from pydantic import BaseModel
 import logging
 
 logger = logging.getLogger(__name__)
@@ -147,6 +148,54 @@ async def delete_chat_thread(
         raise
     except Exception as e:
         logger.error(f"Error deleting chat thread {thread_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class UpdateMessageFlagsRequest(BaseModel):
+    message_id: int
+    needs_approval: Optional[bool] = None
+    approved: Optional[bool] = None
+    disapproved: Optional[bool] = None
+    is_error: Optional[bool] = None
+    is_feedback: Optional[bool] = None
+    has_timed_out: Optional[bool] = None
+    can_retry: Optional[bool] = None
+    retry_action: Optional[str] = None
+
+
+@router.put("/thread/{thread_id}/message/flags", response_model=dict)
+async def update_message_flags(
+    thread_id: str,
+    request: UpdateMessageFlagsRequest,
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+):
+    try:
+        success = await chat_service.update_message_flags(
+            thread_id=thread_id,
+            message_id=request.message_id,
+            needs_approval=request.needs_approval,
+            approved=request.approved,
+            disapproved=request.disapproved,
+            is_error=request.is_error,
+            is_feedback=request.is_feedback,
+            has_timed_out=request.has_timed_out,
+            can_retry=request.can_retry,
+            retry_action=request.retry_action,
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail="Message not found or not modified")
+        
+        # Get the updated message to return it
+        updated_message = await chat_service.get_message_by_id(thread_id, request.message_id)
+        
+        return {
+            "success": True, 
+            "message": "Message flags updated",
+            "updated_message": updated_message
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating message flags for thread {thread_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

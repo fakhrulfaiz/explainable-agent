@@ -44,16 +44,16 @@ export const ExplorerRenderer: React.FC<ExplorerRendererProps> = ({
   return (
     <div 
       onClick={onOpenExplorer}
-      className="border border-gray-200 rounded-lg p-4 bg-white hover:bg-gray-50 cursor-pointer transition-colors"
+      className="border border-gray-200 dark:border-neutral-700 rounded-lg p-4 bg-white dark:bg-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-700 cursor-pointer transition-colors"
     >
       {/* User's Original Question */}
-      <div className="font-medium text-gray-900 mb-2">
-        <span className="text-blue-600 text-sm font-normal">Question: </span>
-        {getUserQuestion()}
+      <div className="font-medium text-gray-900 dark:text-white mb-2 max-w-full">
+        <span className="text-blue-600 dark:text-blue-400 text-sm font-normal">Question: </span>
+        <span className="truncate block">{getUserQuestion()}</span>
       </div>
       
       {/* Summary in gray text */}
-      <div className="text-sm text-gray-500">
+      <div className="text-sm text-gray-500 dark:text-neutral-400">
         {getSummary()}
       </div>
     </div>

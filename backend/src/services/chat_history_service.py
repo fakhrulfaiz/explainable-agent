@@ -135,6 +135,42 @@ class ChatHistoryService:
         except Exception as e:
             logger.error(f"Error adding message to thread {request.thread_id}: {e}")
             raise Exception(f"Failed to add message: {e}")
+
+    async def update_message_flags(self, thread_id: str, message_id: int, *,
+                                   needs_approval: Optional[bool] = None,
+                                   approved: Optional[bool] = None,
+                                   disapproved: Optional[bool] = None,
+                                   is_error: Optional[bool] = None,
+                                   is_feedback: Optional[bool] = None,
+                                   has_timed_out: Optional[bool] = None,
+                                   can_retry: Optional[bool] = None,
+                                   retry_action: Optional[str] = None) -> bool:
+        """Persistently update message approval/flag fields by message_id."""
+        try:
+            updates = {
+                "thread_id": thread_id,
+                "needs_approval": needs_approval,
+                "approved": approved,
+                "disapproved": disapproved,
+                "is_error": is_error,
+                "is_feedback": is_feedback,
+                "has_timed_out": has_timed_out,
+                "can_retry": can_retry,
+                "retry_action": retry_action,
+                "updated_at": datetime.now()
+            }
+            return await self.messages_repo.update_message_by_message_id(message_id, updates)
+        except Exception as e:
+            logger.error(f"Error updating message flags for thread {thread_id}, message {message_id}: {e}")
+            raise Exception(f"Failed to update message flags: {e}")
+
+    async def get_message_by_id(self, thread_id: str, message_id: int) -> Optional[ChatMessage]:
+        """Get a specific message by its ID within a thread."""
+        try:
+            return await self.messages_repo.get_message_by_id(thread_id, message_id)
+        except Exception as e:
+            logger.error(f"Error retrieving message {message_id} from thread {thread_id}: {e}")
+            raise Exception(f"Failed to retrieve message: {e}")
     
     async def get_all_threads(self, limit: int = 50, skip: int = 0) -> List[ChatThread]:
         try:

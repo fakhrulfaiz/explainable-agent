@@ -8,184 +8,38 @@ from langchain_core.prompts import ChatPromptTemplate
 from typing import List, Dict, Any, Tuple, Optional
 from pydantic import Field
 import json
+from src.utils.pie_chart_utils import get_pie_guidance
+from src.utils.bar_chart_utils import get_bar_guidance
+from src.utils.line_chart_utils import get_line_guidance
+from src.utils.chart_utils import get_chart_template
 
 
-# Visualization format schemas - dynamically fetched based on type
+
 VIZ_FORMAT_SCHEMAS = {
     "bar": {
         "description": "Bar chart for comparing categorical data",
-        "format": {
-            "type": "bar",
-            "title": "Chart title",
-            "data": [
-                {"category": "Category 1", "metric1": 100, "metric2": 50},
-                {"category": "Category 2", "metric1": 150, "metric2": 75}
-            ],
-            "config": {
-                "xAxis": {"key": "category", "label": "Category"},
-                "yAxis": [
-                    {"key": "metric1", "label": "Metric 1", "color": "#8884d8"},
-                    {"key": "metric2", "label": "Metric 2", "color": "#82ca9d"}
-                ],
-                "orientation": "vertical"
-            }
-        }
+        "format": get_chart_template("bar", {"variant": "vertical"}),
     },
     "line": {
         "description": "Line chart for time series or trends",
-        "format": {
-            "type": "line",
-            "title": "Chart title",
-            "data": [
-                {"time_period": "Jan", "metric1": 100, "metric2": 50},
-                {"time_period": "Feb", "metric1": 120, "metric2": 60}
-            ],
-            "config": {
-                "xAxis": {"key": "time_period", "label": "Time Period"},
-                "yAxis": [
-                    {"key": "metric1", "label": "Metric 1", "color": "#8884d8"},
-                    {"key": "metric2", "label": "Metric 2", "color": "#82ca9d"}
-                ]
-            }
-        }
+        "format": get_chart_template("line", {"variant": "line"}),
     },
     "pie": {
         "description": "Pie chart for showing proportions with multiple variants",
-        "format": {
-            "type": "pie",
-            "title": "Chart title",
-            "data": [
-                {"category": "Category 1", "count": 400},
-                {"category": "Category 2", "count": 300}  # Can be empty when using nested or multiple
-            ],
-            "config": {
-                "variant": "simple",  # simple, donut, two-level, straight-angle, custom-active
-                "nested": {
-                    "enabled": False,
-                    "innerData": [],  # For two-level: [{ name: "Category", value: 100 }]
-                    "outerData": []   # For two-level: [{ name: "Item", value: 30, parent: "Category" }]
-                }
-            }
-        }
+        "format": get_chart_template("pie", {"variant": "simple"}),
     },
-    "scatter": {
-        "description": "Scatter plot for correlations",
-        "format": {
-            "type": "scatter",
-            "title": "Chart title",
-            "data": [
-                {"x_value": 10, "y_value": 20, "label": "Point 1"},
-                {"x_value": 15, "y_value": 25, "label": "Point 2"}
-            ],
-            "config": {
-                "xAxis": {"key": "x_value", "label": "X Axis"},
-                "yAxis": {"key": "y_value", "label": "Y Axis"}
-            }
-        }
-    },
-    "table": {
-        "description": "Table for detailed data view",
-        "format": {
-            "type": "table",
-            "title": "Table title",
-            "data": [
-                {"field1": "value1", "field2": 100, "field3": 8.5},
-                {"field1": "value2", "field2": 120, "field3": 9.0}
-            ],
-            "config": {
-                "columns": [
-                    {"key": "field1", "label": "Field 1", "sortable": True},
-                    {"key": "field2", "label": "Field 2", "type": "number", "sortable": True},
-                    {"key": "field3", "label": "Field 3", "type": "number", "sortable": True}
-                ]
-            }
-        }
-    },
-    "network": {
-        "description": "Network graph for relationships",
-        "format": {
-            "type": "network",
-            "title": "Network title",
-            "data": {
-                "nodes": [
-                    {"id": "node1", "label": "Entity 1", "type": "person"},
-                    {"id": "node2", "label": "Entity 2", "type": "company"}
-                ],
-                "edges": [
-                    {"source": "node1", "target": "node2", "label": "works_at"}
-                ]
-            },
-            "config": {
-                "layout": "force"
-            }
-        }
-    },
-    "heatmap": {
-        "description": "Heatmap for matrix data",
-        "format": {
-            "type": "heatmap",
-            "title": "Heatmap title",
-            "data": [
-                {"x_axis": "Mon", "y_axis": "Morning", "intensity": 45},
-                {"x_axis": "Mon", "y_axis": "Afternoon", "intensity": 67}
-            ],
-            "config": {
-                "colorScale": ["#blue", "#yellow", "#red"]
-            }
-        }
-    }
 }
 
-
 def get_pie_specific_guidance() -> str:
-    """
-    Get pie chart specific format and guidance.
-    
-    Returns:
-        Formatted string with pie-specific schema and guidelines
-    """
-    return """
-For Pie Charts, choose variant based on data structure:
+    return get_pie_guidance()
 
-1. Variants:
-   - 'simple': For basic category distribution (e.g., product types)
-   - 'donut': Same as simple, with center space for total/summary
-   - 'two-level': For parent-child data (e.g., genre->movies)
-   - 'straight-angle': For precise proportion comparisons
-   - 'custom-active': For interactive data exploration
-
-2. Two-Level Data Format Example:
-   data: []
-   format: {
-   config: {
-     variant: "two-level",
-     nested: {
-       enabled: true,
-       innerData: [
-         { name: "Category1", count: 100 },  // Use 'count' for values
-         { name: "Category2", count: 150 }
-       ],
-       outerData: [
-         { name: "Item1", count: 30, parent: "Category1" },  // Must have unique names
-         { name: "Item2", count: 70, parent: "Category1" },
-         { name: "Item3", count: 80, parent: "Category2" }
-       ]
-     }
-    }
-   }
-
-3. Choose Based On:
-   - Data relationships (flat vs hierarchical)
-   - User interaction needs
-   - Comparison requirements
-"""
-
-def get_viz_format_for_prompt(viz_type: str) -> str:
+def get_viz_format_for_prompt(viz_type: str, config: Optional[Dict[str, Any]] = None) -> str:
     """
     Dynamically fetch visualization format schema and type-specific guidance for the prompt.
     
     Args:
         viz_type: Visualization type to include in prompt
+        config: Optional configuration dict (e.g., {"variant": "donut"})
         
     Returns:
         Formatted string with schema and guidance
@@ -194,18 +48,24 @@ def get_viz_format_for_prompt(viz_type: str) -> str:
         return ""
         
     schema = VIZ_FORMAT_SCHEMAS[viz_type]
+    # Build dynamic format based on config/variant when provided
+    dynamic_format = get_chart_template(viz_type, config)
     format_str = f"""
 **{viz_type.upper()} Chart**
 Description: {schema['description']}
 Format:
 ```json
-{json.dumps(schema['format'], indent=2)}
+{json.dumps(dynamic_format, indent=2)}
 ```
 """
     
-    # Add pie-specific guidance only for pie charts
+    # Add type-specific guidance
     if viz_type == 'pie':
         format_str += "\n" + get_pie_specific_guidance()
+    elif viz_type == 'bar':
+        format_str += "\n" + get_bar_guidance()
+    elif viz_type == 'line':
+        format_str += "\n" + get_line_guidance()
     
     return format_str
 
@@ -264,8 +124,8 @@ class SmartTransformForVizTool(BaseTool):
             # Convert to dict format for LLM processing
             data_dicts = [dict(zip(columns, row)) for row in raw_data]
             
-            # Get format and guidance for visualization
-            viz_formats = get_viz_format_for_prompt(viz_type)
+            # Get format and guidance for visualization with selected variant (from config)
+            viz_formats = get_viz_format_for_prompt(viz_type, config)
             
             # Use type-specific prompt
             base_prompt = """You are a data visualization expert working with an explainable AI agent. 

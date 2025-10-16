@@ -41,7 +41,7 @@ interface PieChartVisualizerProps {
 
 const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#a78bfa', '#34d399'];
 
-const cardClass = 'bg-white rounded-lg border border-gray-200 p-4';
+const cardClass = 'bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4';
 
 
 // Helper to render labels based on configuration
@@ -194,7 +194,7 @@ export default function PieChartVisualizer({ spec }: PieChartVisualizerProps) {
         <div className={cardClass}>
             <div ref={chartRef}>
                 {spec?.title && (
-                    <h2 className="text-base font-semibold text-gray-900 mb-3">{spec.title}</h2>
+                    <h2 className="text-base font-semibold text-gray-900 dark:text-neutral-100 mb-3">{spec.title}</h2>
                 )}
 
                 <div className="w-full h-[calc(60vh-2rem)] min-h-[300px]">

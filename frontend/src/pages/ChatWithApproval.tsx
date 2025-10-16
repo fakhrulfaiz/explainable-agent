@@ -4,14 +4,14 @@ import { ChatComponent, ExplorerPanel, VisualizationPanel } from '../components'
 import Sidebar from '../components/Sidebar';
 import { Message, HandlerResponse } from '../types/chat';
 import { GraphService } from '../api/services/graphService';
+import { ChatHistoryService } from '../api/services/chatHistoryService';
 import { ExplorerService } from '../api/services/explorerService';
 import { VisualizationService } from '../api/services/visualizationService';
-import { ChatHistoryService } from '../api/services/chatHistoryService';
 import { useUIState } from '../contexts/UIStateContext';
 
 const ChatWithApproval: React.FC = () => {
   // Use the UI state context
-  const { state, setExecutionStatus, setThreadId, setLoading, setUseStreaming } = useUIState();
+  const { state, setExecutionStatus, setThreadId, setLoading } = useUIState();
   // Streaming preference from UI state (replaces separate StreamingContext)
   const useStreaming = state.useStreaming;
   React.useEffect(() => {
@@ -30,6 +30,7 @@ const ChatWithApproval: React.FC = () => {
   const [visualizationCharts, setVisualizationCharts] = useState<any[] | null>(null);
   const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false); // Sidebar state - starts closed
+  const [currentThreadTitle, setCurrentThreadTitle] = useState<string>(''); // Thread title state
 
   // Streaming connection reference
   const eventSourceRef = React.useRef<EventSource | null>(null);
@@ -38,72 +39,32 @@ const ChatWithApproval: React.FC = () => {
   const currentThreadIdRef = React.useRef<string | null>(null);
 
   const convertChatHistoryToMessages = (chatMessages: any[]): Message[] => {
-    return chatMessages.map((msg, index) => ({
-      id: Date.now() + index,
-      role: msg.sender as 'user' | 'assistant',
-      content: msg.content,
-      timestamp: new Date(msg.timestamp),
-      needsApproval: false,
-      threadId: selectedChatThreadId || undefined,
-      messageType: msg.message_type as any,
-      checkpointId: msg.checkpoint_id
-    }));
+    return chatMessages.map((msg, index) => {
+      const approved: boolean = !!msg.approved;
+      const disapproved: boolean = !!msg.disapproved;
+      const needsApprovalFlag: boolean = !!msg.needs_approval;
+      const needsApprovalComputed = needsApprovalFlag && !approved && !disapproved;
+
+      return {
+        id: (typeof msg.message_id === 'number' ? msg.message_id : (Date.now() + index)),
+        role: (msg.sender === 'assistant' ? 'assistant' : 'user'),
+        content: String(msg.content ?? ''),
+        timestamp: new Date(msg.timestamp),
+        needsApproval: needsApprovalComputed,
+        approved,
+        disapproved,
+        isError: !!msg.is_error,
+        isFeedback: !!msg.is_feedback,
+        hasTimedOut: !!msg.has_timed_out,
+        canRetry: !!msg.can_retry,
+        retryAction: msg.retry_action || undefined,
+        threadId: msg.thread_id || selectedChatThreadId || undefined,
+        messageType: (msg.message_type as any) || 'message',
+        checkpointId: msg.checkpoint_id
+      } as Message;
+    });
   };
 
-  const restoreExplorerDataIfNeeded = async (messages: Message[], threadId: string) => {
-    const explorerMessages = messages.filter(msg => 
-      msg.messageType === 'explorer' && 
-      msg.checkpointId && 
-      msg.role === 'assistant'
-    );
-
-    if (explorerMessages.length > 0) {
-      try {
-        const explorerDataMap = new Map();
-        
-        for (const explorerMessage of explorerMessages) {
-          try {
-            const explorerData = await ExplorerService.getExplorerData(
-              threadId,
-              explorerMessage.checkpointId!
-            );
-            
-            if (explorerData) {
-              explorerDataMap.set(explorerMessage.id, explorerData);
-            }
-          } catch (error) {
-            console.error('Failed to restore explorer data for checkpoint:', explorerMessage.checkpointId, error);
-          }
-        }
-        
-        const updatedMessages = messages.map(msg => {
-          if (msg.messageType === 'explorer' && explorerDataMap.has(msg.id)) {
-            const explorerData = explorerDataMap.get(msg.id);
-            return {
-              ...msg,
-              metadata: { explorerData }
-            };
-          }
-          return msg;
-        });
-        
-        setRestoredMessages(updatedMessages);
-        
-        const lastExplorerMessage = explorerMessages[explorerMessages.length - 1];
-        if (lastExplorerMessage) {
-          const lastUpdatedMessage = updatedMessages.find(msg => msg.id === lastExplorerMessage.id);
-          if (lastUpdatedMessage?.metadata?.explorerData) {
-            setExplorerData(lastUpdatedMessage.metadata.explorerData);
-          }
-        }
-        
-      } catch (error) {
-        console.error('Failed to restore explorer data:', error);
-      }
-    } else {
-      setRestoredMessages(messages);
-    }
-  };
 
   const restoreDataIfNeeded = async (messages: Message[], threadId: string) => {
     const explorerMessages = messages.filter(msg => 
@@ -182,6 +143,11 @@ const ChatWithApproval: React.FC = () => {
         });
         
         setRestoredMessages(updatedMessages);
+
+        // If any restored message needs approval, set execution status to user_feedback
+        if (updatedMessages.some(m => m.needsApproval)) {
+          setExecutionStatus('user_feedback');
+        }
         
         // Set the latest explorer data
         const lastExplorerMessage = explorerMessages[explorerMessages.length - 1];
@@ -206,6 +172,10 @@ const ChatWithApproval: React.FC = () => {
       }
     } else {
       setRestoredMessages(messages);
+      // If any restored message needs approval, set execution status to user_feedback
+      if (messages.some(m => m.needsApproval)) {
+        setExecutionStatus('user_feedback');
+      }
     }
   };
 
@@ -240,12 +210,41 @@ const ChatWithApproval: React.FC = () => {
         is_feedback: msg.isFeedback || undefined,
         has_timed_out: msg.hasTimedOut || undefined,
         can_retry: msg.canRetry || undefined,
-        retry_action: msg.retryAction || undefined,
-        thread_id_ref: msg.threadId || undefined,
+        retry_action: msg.retryAction || undefined
 
       });
     } catch (e) {
       console.error('Failed to persist message:', e);
+    }
+  };
+
+  const handleMessageUpdated = async (msg: Message) => {
+    // Handle persistent storage of message flag updates
+    const threadId = currentThreadIdRef.current || state.currentThreadId || selectedChatThreadId || msg.threadId;
+    if (!threadId) {
+      console.error('No thread ID available for message update');
+      return;
+    }
+
+    try {
+      // Update message flags in the database
+      await ChatHistoryService.updateMessageFlags(threadId, {
+        message_id: msg.id,
+        needs_approval: msg.needsApproval,
+        approved: msg.approved,
+        disapproved: msg.disapproved,
+        is_error: msg.isError,
+        is_feedback: msg.isFeedback,
+        has_timed_out: msg.hasTimedOut,
+        can_retry: msg.canRetry,
+        retry_action: msg.retryAction
+      });
+      
+      console.log('Message flags updated in database:', msg.id, 'in thread:', threadId);
+    } catch (error) {
+      console.error('Failed to update message flags in database:', error);
+      // The UI state has already been updated, so we don't need to revert it
+      // This provides a better user experience even if the backend update fails
     }
   };
 
@@ -296,7 +295,7 @@ const ChatWithApproval: React.FC = () => {
     streamingMessageId: number,
     chatThreadId: string,
     updateMessageCallback: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void,
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result' | 'completed_payload' | 'visualizations_ready', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void,
     usePlanning: boolean = true,
     useExplainer: boolean = true
   ): Promise<void> => {
@@ -315,7 +314,52 @@ const ChatWithApproval: React.FC = () => {
           if (data.content) {
             updateMessageCallback(streamingMessageId, data.content);
           } else if (data.status) {
-            setExecutionStatus(data.status);
+            if (data.status === 'completed_payload') {
+              // Handle explorer data from completed payload
+              const graphData = data.graph;
+              if (graphData && graphData.steps && graphData.steps.length > 0) {
+                const explorerMessageId = Date.now() + Math.floor(Math.random() * 1000);
+                const explorerMessage = {
+                  id: explorerMessageId,
+                  role: 'assistant',
+                  content: 'Explorer data available',
+                  timestamp: new Date(),
+                  messageType: 'explorer',
+                  checkpointId: graphData.checkpoint_id,
+                  metadata: { explorerData: graphData },
+                  threadId: chatThreadId
+                };
+                if (updateMessageCallback) {
+                  updateMessageCallback(explorerMessageId, JSON.stringify(explorerMessage));
+                }
+              }
+            } else if (data.status === 'visualizations_ready') {
+              // Handle visualization data
+              const visualizations = data.visualizations || [];
+              if (visualizations.length > 0) {
+                // Create a new message with its own ID for visualization data
+                const vizMessageId = Date.now() + Math.floor(Math.random() * 1000) + 10000;
+                const vizMessage = {
+                  id: vizMessageId,
+                  role: 'assistant',
+                  content: 'Visualizations available',
+                  timestamp: new Date(),
+                  messageType: 'visualization',
+                  checkpointId: data.checkpoint_id,
+                  metadata: { visualizations: visualizations },
+                  threadId: chatThreadId
+                };
+
+                if (updateMessageCallback) {
+                  updateMessageCallback(vizMessageId, JSON.stringify(vizMessage));
+                }
+              }
+              
+            }
+            else {
+              setExecutionStatus(data.status);
+            }
+            
             if (onStatus) {
               onStatus(data.status, data.eventData, data.response_type);  // Pass response_type
             }
@@ -344,7 +388,7 @@ const ChatWithApproval: React.FC = () => {
     humanComment?: string,
     streamingMessageId?: number,
     updateMessageCallback?: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result' | 'completed_payload' | 'visualizations_ready', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void
   ): Promise<void> => {
     try {
       await GraphService.resumeStreamingGraph({
@@ -361,6 +405,63 @@ const ChatWithApproval: React.FC = () => {
           if (data.content && streamingMessageId && updateMessageCallback) {
             updateMessageCallback(streamingMessageId, data.content);
           } else if (data.status) {
+            if (data.status === 'completed_payload') {
+              // Handle explorer data from completed payload
+              const graphData = data.graph;
+              if (graphData && graphData.steps && graphData.steps.length > 0) {
+                // Create a new message with its own ID for explorer data
+                const explorerMessageId = Date.now() + Math.floor(Math.random() * 1000);
+                const explorerMessage = {
+                  id: explorerMessageId,
+                  role: 'assistant',
+                  content: 'Explorer data available',
+                  timestamp: new Date(),
+                  messageType: 'explorer',
+                  checkpointId: graphData.checkpoint_id,
+                  metadata: { explorerData: graphData },
+                  threadId: threadId
+                };
+                
+                // Add the explorer message to the chat using updateMessageCallback with the new ID
+                if (updateMessageCallback) {
+                  updateMessageCallback(explorerMessageId, JSON.stringify(explorerMessage));
+                }
+                
+                // Use the global window functions to open explorer
+                if ((window as any).openExplorer) {
+                  (window as any).openExplorer(graphData);
+                }
+              }
+              // Don't append graph data to the streaming message content
+              // The graph data is handled separately above for explorer messages
+            } else if (data.status === 'visualizations_ready') {
+              // Handle visualization data
+              const visualizations = data.visualizations || [];
+              if (visualizations.length > 0) {
+                // Create a new message with its own ID for visualization data
+                const vizMessageId = Date.now() + Math.floor(Math.random() * 1000) + 10000;
+                const vizMessage = {
+                  id: vizMessageId,
+                  role: 'assistant',
+                  content: 'Visualizations available',
+                  timestamp: new Date(),
+                  messageType: 'visualization',
+                  checkpointId: data.checkpoint_id,
+                  metadata: { visualizations: visualizations },
+                  threadId: threadId
+                };
+                
+                // Add the visualization message to the chat using updateMessageCallback with the new ID
+                if (updateMessageCallback) {
+                  updateMessageCallback(vizMessageId, JSON.stringify(vizMessage));
+                }
+                
+                // Use the global window functions to open visualizations
+                if ((window as any).openVisualization) {
+                  (window as any).openVisualization(visualizations);
+                }
+              }
+            }
             setExecutionStatus(data.status);
             if (onStatus) {
               onStatus(data.status, data.eventData, data.response_type);  // Pass response_type
@@ -385,7 +486,7 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (message: string, messageHistory: Message[], options?: { usePlanning?: boolean; useExplainer?: boolean; attachedFiles?: File[] }): Promise<HandlerResponse> => {
+  const handleSendMessage = async (message: string, _messageHistory: Message[], options?: { usePlanning?: boolean; useExplainer?: boolean; attachedFiles?: File[] }): Promise<HandlerResponse> => {
     // Close any open panels at start
     setExplorerData(null);
     setExplorerOpen(false);
@@ -469,7 +570,7 @@ const ChatWithApproval: React.FC = () => {
           streamingHandler: async (
             streamingMessageId: number,
             updateMessageCallback: (id: number, content: string) => void,
-            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
+            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result' | 'completed_payload' | 'visualizations_ready', eventData?: string) => void
           ) => {
             await startStreamingForMessage(message, streamingMessageId, chatThreadId, updateMessageCallback, onStatus, usePlanning, useExplainer);
           }
@@ -485,7 +586,7 @@ const ChatWithApproval: React.FC = () => {
   const handleApprove = async (_content: string, message: Message): Promise<HandlerResponse> => {
     console.log('Approval attempt:', { messageId: message.id });
     
-    const threadId = state.currentThreadId;
+    const threadId = currentThreadIdRef.current || state.currentThreadId || selectedChatThreadId || message.threadId;
     
     if (!threadId) {
       throw new Error('No active thread to approve');
@@ -544,7 +645,7 @@ const ChatWithApproval: React.FC = () => {
           streamingHandler: async (
             streamingMessageId: number,
             updateMessageCallback: (id: number, content: string) => void,
-            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
+            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result' | 'completed_payload' | 'visualizations_ready', eventData?: string) => void
           ) => {
             await resumeStreamingForMessage(threadId, 'approved', undefined, streamingMessageId, updateMessageCallback, onStatus);
           }
@@ -560,7 +661,7 @@ const ChatWithApproval: React.FC = () => {
 
   const handleFeedback = async (content: string, _message: Message): Promise<HandlerResponse> => {
     
-    const threadId = state.currentThreadId;
+    const threadId = currentThreadIdRef.current || state.currentThreadId || selectedChatThreadId;
     
     if (!threadId) {
       throw new Error('No active thread to provide feedback for');
@@ -631,7 +732,7 @@ const ChatWithApproval: React.FC = () => {
           streamingHandler: async (
             streamingMessageId: number,
             updateMessageCallback: (id: number, content: string) => void,
-            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string) => void
+            onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result' | 'completed_payload' | 'visualizations_ready', eventData?: string) => void
           ) => {
             await resumeStreamingForMessage(threadId, 'feedback', content, streamingMessageId, updateMessageCallback, onStatus);
           }
@@ -647,7 +748,7 @@ const ChatWithApproval: React.FC = () => {
   const handleCancel = async (_content: string, message: Message): Promise<string> => {
     console.log('Cancel attempt:', { messageId: message.id });
     
-    const threadId = state.currentThreadId;
+    const threadId = currentThreadIdRef.current || state.currentThreadId || selectedChatThreadId || message.threadId;
     
     if (!threadId) {
       throw new Error('No active thread to cancel');
@@ -741,7 +842,10 @@ const ChatWithApproval: React.FC = () => {
         const thread = await ChatHistoryService.restoreThread(threadId);
         const convertedMessages = convertChatHistoryToMessages(thread.messages || []);
         
-        setThreadId(null);
+        // Set the thread title
+        setCurrentThreadTitle(thread.title || 'Untitled Thread');
+        
+        setThreadId(threadId);
         setExplorerData(null);
         setExplorerOpen(false);
         setVisualizationCharts(null);
@@ -751,6 +855,7 @@ const ChatWithApproval: React.FC = () => {
         setChatKey(prev => prev + 1);
       } else {
         setRestoredMessages([]);
+        setCurrentThreadTitle(''); // Clear thread title for new thread
         setChatKey(prev => prev + 1);
         setThreadId(null);
         setExplorerData(null);
@@ -770,12 +875,27 @@ const ChatWithApproval: React.FC = () => {
     setSelectedChatThreadId(null);
     currentThreadIdRef.current = null;
     setRestoredMessages([]);
+    setCurrentThreadTitle(''); // Clear thread title for new thread
     setChatKey(prev => prev + 1);
     setThreadId(null);
     setExplorerData(null);
     setExplorerOpen(false);
     setVisualizationCharts(null);
     setVisualizationOpen(false);
+  };
+
+  // Handle thread title changes
+  const handleTitleChange = async (newTitle: string) => {
+    if (!selectedChatThreadId) return;
+    
+    try {
+      // Update the title via API (you'll need to implement this endpoint)
+      // await ChatHistoryService.updateThreadTitle(selectedChatThreadId, newTitle);
+      setCurrentThreadTitle(newTitle);
+    } catch (error) {
+      console.error('Failed to update thread title:', error);
+      // You might want to show an error message to the user
+    }
   };
 
   return (
@@ -790,8 +910,8 @@ const ChatWithApproval: React.FC = () => {
       />
 
       {/* Main Content - dynamic left padding based on sidebar (desktop only) */}
-      <div className={`h-full min-h-0 overflow-hidden flex flex-col pl-0 ${sidebarOpen ? 'md:pl-80' : 'md:pl-[4.5rem]'}`} style={{ padding: '0 0.5rem' }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div className={`h-full min-h-0 flex flex-col pl-0 ${sidebarOpen ? 'md:pl-80' : 'md:pl-[4.5rem]'}`} style={{ padding: '0 0.5rem' }}>
+        <div className="w-full h-full flex flex-col min-h-0">
         
           {/* Thread Selector - Commented for future use */}
           {/* <div className="mb-4 flex items-center justify-between">
@@ -820,36 +940,31 @@ const ChatWithApproval: React.FC = () => {
           </div> */}
 
           {/* Chat Container */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-              <div className="flex-1 min-h-0" style={{ overflow: 'hidden' }}>
-                <ChatComponent
-                  key={`chat-approval-${chatKey}`}
-                  onSendMessage={handleSendMessage}
-                  onApprove={handleApprove}
-                  onFeedback={handleFeedback}
-                  onCancel={handleCancel}
-                  onRetry={handleRetry}
-                  currentThreadId={state.currentThreadId || selectedChatThreadId}
-                  initialMessages={restoredMessages}
-                  placeholder="Ask me anything..."
-                  className="h-full"
-                  onMessageCreated={handleMessageCreated}
-                />
-              </div>
+          <div className="flex-1 min-h-0">
+            <div className="w-full h-full">
+              <ChatComponent
+                key={`chat-approval-${chatKey}`}
+                onSendMessage={handleSendMessage}
+                onApprove={handleApprove}
+                onFeedback={handleFeedback}
+                onCancel={handleCancel}
+                onRetry={handleRetry}
+                currentThreadId={state.currentThreadId || selectedChatThreadId}
+                initialMessages={restoredMessages}
+                placeholder="Ask me anything..."
+                className="h-full"
+                onMessageCreated={handleMessageCreated}
+                onMessageUpdated={handleMessageUpdated}
+                threadTitle={currentThreadTitle}
+                onTitleChange={handleTitleChange}
+              />
             </div>
           </div>
 
-          <div className="mt-4 text-center">
+          <div className="text-center">
             {state.currentThreadId || selectedChatThreadId && (
               <span className="text-xs text-gray-500 mr-4">
                 Graph Thread: {state.currentThreadId || selectedChatThreadId}
-              </span>
-            )}
-            {/* Note: pendingApproval status is now handled in ChatComponent */}
-            {state.isLoading && (
-              <span className="text-xs text-blue-600 mr-4">
-                Processing...
               </span>
             )}
             {loadingThread && (

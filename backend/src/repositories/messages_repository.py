@@ -38,6 +38,27 @@ class MessagesRepository(BaseRepository[ChatMessage]):
     async def add_message(self, message: ChatMessage) -> bool:
         return await self.create(message)
     
+    async def update_message_by_message_id(self, message_id: int, updates: Dict[str, Any]) -> bool:
+        """Update specific fields of a message using its message_id."""
+        # Remove None values to avoid overwriting fields with null unintentionally
+        safe_updates = {k: v for k, v in updates.items() if v is not None}
+        return await self.update_by_id(message_id, safe_updates, id_field="message_id")
+
+    async def get_message_by_id(self, thread_id: str, message_id: int) -> Optional[ChatMessage]:
+        """Get a specific message by its ID within a thread."""
+        try:
+            document = await self.collection.find_one({
+                "thread_id": thread_id,
+                "message_id": message_id
+            })
+            if document:
+                document.pop('_id', None)
+                return self._to_entity(document)
+            return None
+        except PyMongoError as e:
+            logger.error(f"Error finding message {message_id} in thread {thread_id}: {e}")
+            raise Exception(f"Failed to find message: {e}")
+
     async def delete_message(self, message: ChatMessage) -> bool:
         return await self.delete_by_id(message.message_id, "message_id")
     

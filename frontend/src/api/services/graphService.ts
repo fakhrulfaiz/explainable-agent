@@ -162,6 +162,42 @@ export class GraphService {
         onErrorCallback(error as Error);
       }
     });
+
+    // Handle completed events with final payload wrapper
+    eventSource.addEventListener('completed', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data);
+        const inner = payload && payload.data ? payload.data : payload;
+   
+        onMessageCallback({ status: 'completed_payload', graph: inner });
+        // Mark normal closure
+        if (!window._hasReceivedStatusEvent) {
+          window._hasReceivedStatusEvent = {};
+        }
+        window._hasReceivedStatusEvent[eventSource.url] = true;
+      } catch (error) {
+        console.error('Error parsing completed event:', error, 'Raw data:', (event as MessageEvent).data);
+        onErrorCallback(error as Error);
+      }
+    });
+
+    // Handle visualizations_ready events
+    eventSource.addEventListener('visualizations_ready', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data);
+        const inner = payload && payload.data ? payload.data : payload;
+        onMessageCallback({ 
+          status: 'visualizations_ready', 
+          visualizations: inner?.visualizations || [],
+          thread_id: inner?.thread_id,
+          checkpoint_id: inner?.checkpoint_id,
+          types: inner?.types
+        });
+      } catch (error) {
+        console.error('Error parsing visualizations_ready event:', error, 'Raw data:', (event as MessageEvent).data);
+        onErrorCallback(error as Error);
+      }
+    });
     
     // Handle start/resume events
     eventSource.addEventListener('start', (event) => {

@@ -42,7 +42,7 @@ function inferYAxisKeys(
 
 const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#a78bfa', '#34d399'];
 
-const cardClass = 'bg-white rounded-lg border border-gray-200 p-4';
+const cardClass = 'bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4';
 
 export default function LineChartVisualizer({ spec }: LineChartVisualizerProps) {
   if (!spec) return null;
@@ -67,21 +67,21 @@ export default function LineChartVisualizer({ spec }: LineChartVisualizerProps) 
     <div className={cardClass}>
       <div ref={chartRef}>
         {spec?.title ? (
-          <h2 className="text-base font-semibold text-gray-900 mb-3">{spec.title}</h2>
+          <h2 className="text-base font-semibold mb-3 text-gray-900 dark:text-neutral-100">{spec.title}</h2>
         ) : null}
         <div className="w-full h-[calc(60vh-2rem)] min-h-[300px]">
         <ResponsiveContainer>
           <LineChart data={rows} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#404040" />
             <XAxis
               dataKey={xKey}
               label={spec?.config?.xAxis?.label ? { value: spec.config.xAxis.label, position: 'insideBottom', offset: -5 } : undefined}
-              stroke="#6b7280"
+              stroke="#d4d4d4"
               height={80}
               angle={-45}
               textAnchor="end"
             />
-            <YAxis stroke="#6b7280" />
+            <YAxis stroke="#d4d4d4" />
             <Tooltip />
             <Legend 
               verticalAlign="bottom" 

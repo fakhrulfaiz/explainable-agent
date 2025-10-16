@@ -18,6 +18,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from src.models.database import get_mongo_memory
 from src.tools.custom_toolkit import CustomToolkit
+from src.utils.chart_utils import get_supported_charts
 try:
     from explainer import Explainer
     from nodes.planner_node import PlannerNode
@@ -70,21 +71,18 @@ class ExplainableAgent:
         # Create assistant as a react agent with transfer tools
         base_assistant_agent = create_react_agent(
             model=llm,
-            tools=[self.transfer_to_data_exploration, self.transfer_to_general_agent],  # Add transfer_to_explainer_agent when ready
+            tools=[self.transfer_to_data_exploration],  # Add transfer_to_explainer_agent when ready
             prompt=(
                 "You are an assistant that routes tasks to specialized agents.\n\n"
                 "AVAILABLE AGENTS:\n"
-                "- data_exploration_agent: Handles database queries, SQL analysis, and data exploration\n"
+                "- data_exploration_agent: Handles database queries and visualizations, SQL analysis, and data exploration\n"
                 "  Use this for: SQL queries, database analysis, table inspection, data queries, schema questions\n\n"
-                "- general_agent: Handles general questions, conversations, and any other tasks\n"
-                "  Use this for: general questions, conversations, explanations, help, or anything not database-related\n\n"
                 "FUTURE AGENTS (planned):\n"
                 "- explainer_agent: Explains concepts, processes, code, or any topic to users\n"
                 "  Will be used for: explanations, tutorials, concept clarification, how-to questions\n\n"
                 "INSTRUCTIONS:\n"
                 "- Analyze the user's request and determine which specialized agent should handle it\n"
-                "- For database/SQL related queries, use transfer_to_data_exploration\n"
-                "- For general questions, conversations, or anything else, use transfer_to_general_agent\n"
+                "- For database/SQL related queries and visualizations, use transfer_to_data_exploration\n"
                 "- Be helpful and direct in your routing decisions\n"
                 "- IMPORTANT: Only route to agents when you receive a NEW user message, not for agent responses\n"
                 "- CRITICAL: Make only ONE tool call per user message. Pass the full task in a single call.\n"
@@ -223,7 +221,7 @@ class ExplainableAgent:
                 "messages": state.get("messages", []) + [tool_message],
                 "agent_type": "general_agent",
                 "routing_reason": f"Transferred to general agent: {task_description}",
-                "query": query,
+                "query": task_description,
                 "plan": state.get("plan", ""),
                 "steps": state.get("steps", []),
                 "step_counter": state.get("step_counter", 0),
@@ -375,34 +373,40 @@ class ExplainableAgent:
         tool_descriptions = "\n".join([f"- {tool.name}: {tool.description}" for tool in self.tools])
         prompt_template = hub.pull("langchain-ai/sql-agent-system-prompt")
         system_message = prompt_template.format(dialect="SQLite", top_k=5)
+        # Add supported visualization types and variants to guide the LLM
+        try:
+            supported = get_supported_charts()
+            charts_help = [
+                f"- {chart_type}: variants = {', '.join(info.get('variants', []))}"
+                for chart_type, info in supported.items()
+            ]
+            supported_charts = "\nSUPPORTED VISUALIZATIONS:\n" + "\n".join(charts_help) + "\n"
+        except Exception:
+            # Non-fatal if utils are unavailable
+            pass
         system_message += f"""
+
 
 You are a concise SQL database assistant. Answer only what is asked, nothing more.
 - If user asks what tables exist, just list the tables
 - If user asks for data, return the data in markdown table format when appropriate
 - ONLY use smart_transform_for_viz tool when the user EXPLICITLY asks for a chart, graph, or visualization
 - If user asks for multiple charts, call smart_transform_for_viz multiple times with different viz_type parameters, strictly only use supported types.
-- Supported types: bar, line, pie
-- If user didn not specify a viz_type, decide the most appropriate type based on the data and context.
-
-For pie charts, analyze the data and context to choose the most appropriate variant:
-- 'simple': Basic categorical proportions (e.g., "Show product categories distribution")
-- 'donut': When emphasizing totals or adding center text (e.g., "Show sales by department with total in center")
-- 'two-level': For hierarchical data (e.g., "Show Yes/No responses with subcategories")
-- 'straight-angle': For precise proportion comparisons (e.g., "Compare market shares precisely")
-
-Consider these factors when choosing pie variants:
-1. Data structure (hierarchical, flat, nested)
-2. User's intent (comparison, exploration, overview)
-3. Number of categories (too many categories might need grouping)
+- Supported types: {supported_charts}
+- If user did not specify a viz_type, decide the most appropriate type based on the data and context.
 
 - Do NOT use smart_transform_for_viz for regular data queries - just return markdown tables
 - Use tools only when necessary to answer the specific question
 - NEVER generate images or base64 image data (no data:image/png;base64,...). Do not include markdown image tags for charts.
 - For images referenced by the user (not charts) or urls from database, use markdown format: ![Alt text](image_url)
 - For tabular data, format as markdown tables with proper headers and alignment
+- For code, format as markdown code blocks with proper syntax highlighting
 - Give explanation but be direct and brief - no unnecessary explanations or extra tool calls
-- If you cant find any tables or columns, say so, stop the tool calling and provide information. Do not make up data.
+- If you can't find any tables or columns, say so, stop the tool calling and provide information. Do not make up data.
+- You can ask follow-up questions to clarify ambiguous requests or missing information.
+- After providing requested data, you MAY briefly suggest ONE relevant next step if it adds clear value (e.g., "Would you like to visualize this data as a chart?"), but keep it minimal and unobtrusive.
+- Do NOT repeatedly prompt for next actions or suggest multiple follow-ups.
+- If the user's request is clear and complete, just answer it directly without suggestions.
 - IMPORTANT: Do NOT call the same tool with same arguments multiple times. Call each tool only once per response.
 - IMPORTANT: Only use smart_transform_for_viz tool when user specifically requests a visualization/chart
 - IMPORTANT: Do not generate any images or base64 data for visualizations - only use the smart_transform_for_viz tool to return a JSON spec for the frontend renderer.
@@ -410,33 +414,12 @@ Consider these factors when choosing pie variants:
 - Follow the plan strictly if one exists.
 
 Examples (Visualization requests):
-
-Bar Chart Example:
+Example:
 User: "Show a bar chart of the top 5 actors by film count"
 Assistant (good):
 1) Provide a one-paragraph summary of findings (no images)
 2) Call smart_transform_for_viz with raw_data, columns, and viz_type='bar'
 3) Just brief explanation
-
-Pie Chart Examples:
-1. Simple Pie Chart:
-User: "Show me the distribution of film ratings"
-Assistant (good):
-1) Brief summary of rating distribution
-2) Call smart_transform_for_viz with:
-   - viz_type='pie'
-   - config.variant='simple'
-
-
-2. Two-Level Pie:
-User: "Show rental status (returned/not returned) with breakdown by store"
-Assistant (good):
-1) Brief summary of rental status
-2) Call smart_transform_for_viz with:
-   - viz_type='pie'
-   - config.variant='two-level'
-   - Organize data into inner (status) and outer (store) rings
-
 
 Bad Examples (Do NOT do):
 - "![Chart](data:image/png;base64,...)"  (No base64 images)

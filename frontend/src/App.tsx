@@ -1,17 +1,37 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Header } from './components';
+// import { Header } from './components';
 import { ChatWithApproval, StreamingTutorial, Login, SignUp, ForgotPassword, UpdatePassword, AuthConfirm } from './pages';
 import { AuthProvider } from './contexts/AuthContext';
-import { UIStateProvider } from './contexts/UIStateContext';
+import { UIStateProvider, useUIState } from './contexts/UIStateContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import './App.css';
 
 const AppContent: React.FC = () => {
+  const { state } = useUIState();
+  const { isDarkMode } = state;
+
+  // Apply dark mode class to document when state changes
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
+
+  // Initialize dark mode on mount
+  useEffect(() => {
+ 
+  }, []);
+
   return (
-    <div style={{ height: '100vh', backgroundColor: '#f9fafb', display: 'flex', flexDirection: 'column' }}>
-      <Header />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: '6rem', minHeight: 0, overflow: 'auto' }}>
+    <div className={`h-screen flex flex-col transition-colors duration-200 ${
+      isDarkMode 
+        ? 'bg-neutral-800 text-white' 
+        : 'bg-gray-50 text-gray-900'
+    }`}>
+      <div className="flex-1 flex flex-col min-h-0">
         <Routes>
           {/* 🟢 Public routes - anyone can access */}
           <Route path="/login" element={<Login />} />

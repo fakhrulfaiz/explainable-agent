@@ -4,7 +4,7 @@ import React, { createContext, useContext, useReducer, ReactNode } from 'react';
 export type ExecutionStatus = 'idle' | 'running' | 'user_feedback' | 'finished' | 'error' | 'cancelled';
 
 export interface UIState {
-  // Core execution state
+
   executionStatus: ExecutionStatus;
   currentThreadId: string | null;
   
@@ -13,6 +13,9 @@ export interface UIState {
   
   // Streaming preference
   useStreaming: boolean;
+  
+  // Dark mode preference
+  isDarkMode: boolean;
 }
 
 export type UIAction = 
@@ -20,13 +23,24 @@ export type UIAction =
   | { type: 'SET_THREAD_ID'; payload: string | null }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_USE_STREAMING'; payload: boolean }
+  | { type: 'SET_DARK_MODE'; payload: boolean }
   | { type: 'RESET_STATE' };
+
+// Load dark mode preference from localStorage
+const getInitialDarkMode = () => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('darkMode');
+    return saved === 'true';
+  }
+  return false;
+};
 
 const initialState: UIState = {
   executionStatus: 'idle',
   currentThreadId: null,
   isLoading: false,
   useStreaming: true,
+  isDarkMode: getInitialDarkMode(),
 };
 
 function uiStateReducer(state: UIState, action: UIAction): UIState {
@@ -42,6 +56,9 @@ function uiStateReducer(state: UIState, action: UIAction): UIState {
     
     case 'SET_USE_STREAMING':
       return { ...state, useStreaming: action.payload };
+    
+    case 'SET_DARK_MODE':
+      return { ...state, isDarkMode: action.payload };
     
     case 'RESET_STATE':
       return initialState;
@@ -60,6 +77,7 @@ interface UIStateContextType {
   setThreadId: (threadId: string | null) => void;
   setLoading: (loading: boolean) => void;
   setUseStreaming: (useStreaming: boolean) => void;
+  setDarkMode: (isDarkMode: boolean) => void;
   resetState: () => void;
 }
 
@@ -80,6 +98,9 @@ export function UIStateProvider({ children }: { children: ReactNode }) {
   const setUseStreaming = (useStreaming: boolean) =>
     dispatch({ type: 'SET_USE_STREAMING', payload: useStreaming });
   
+  const setDarkMode = (isDarkMode: boolean) =>
+    dispatch({ type: 'SET_DARK_MODE', payload: isDarkMode });
+  
   const resetState = () => dispatch({ type: 'RESET_STATE' });
 
   const value: UIStateContextType = {
@@ -89,6 +110,7 @@ export function UIStateProvider({ children }: { children: ReactNode }) {
     setThreadId,
     setLoading,
     setUseStreaming,
+    setDarkMode,
     resetState,
   };
 

@@ -15,7 +15,6 @@ export interface Message {
   threadId?: string;
   messageType?: 'message' | 'explorer' | 'visualization';
   checkpointId?: string;
-  // New fields for rich content
   metadata?: {
     explorerData?: any;
     visualizations?: any[];
@@ -36,7 +35,7 @@ export interface HandlerResponse {
   streamingHandler?: (
     streamingMessageId: number, 
     updateMessageCallback: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result' | 'completed_payload' | 'visualizations_ready', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void
   ) => Promise<void>;
 }
 
@@ -53,6 +52,9 @@ export interface ChatComponentProps {
   placeholder?: string;
   disabled?: boolean;
   onMessageCreated?: (message: Message) => void;
+  onMessageUpdated?: (message: Message) => void;
+  threadTitle?: string;
+  onTitleChange?: (newTitle: string) => void;
 }
 
 export interface MessageComponentProps {
@@ -60,13 +62,6 @@ export interface MessageComponentProps {
   onRetry?: (messageId: number) => void;
 }
 
-export interface FeedbackFormProps {
-  feedbackText: string;
-  setFeedbackText: (text: string) => void;
-  onSendFeedback: () => void;
-  onCancel: () => void;
-  isLoading: boolean;
-}
 
 // Graph API Types
 export interface StartRequest {

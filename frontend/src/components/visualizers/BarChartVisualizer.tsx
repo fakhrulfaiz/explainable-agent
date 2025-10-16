@@ -14,12 +14,14 @@ export interface BarChartSpec {
 	config?: {
 		xAxis?: { key?: string; label?: string };
 		yAxis?: YAxisConfig[];
+		stacked?: boolean;
 	};
 	metadata?: Record<string, unknown>;
 }
 
 interface BarChartVisualizerProps {
 	spec: BarChartSpec;
+	forceLight?: boolean;
 }
 
 function inferXAxisKey(rows: Array<Record<string, unknown>>, configuredKey?: string): string {
@@ -42,9 +44,9 @@ function inferYAxisKeys(
 
 const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#a78bfa', '#34d399'];
 
-const cardClass = 'bg-white rounded-lg border border-gray-200 p-4';
+const cardClass = 'bg-white dark:bg-neutral-800 rounded-lg border border-gray-200 dark:border-neutral-700 p-4';
 
-export default function BarChartVisualizer({ spec }: BarChartVisualizerProps) {
+export default function BarChartVisualizer({ spec, forceLight = false }: BarChartVisualizerProps) {
 	if (!spec) return null;
 
 	const chartRef = useRef<HTMLDivElement>(null);
@@ -55,34 +57,48 @@ export default function BarChartVisualizer({ spec }: BarChartVisualizerProps) {
 		spec?.config?.yAxis?.map((y) => y.key),
 		xKey
 	);
+	const isStacked = spec?.config?.stacked ?? false;
 
-	return (
-		<div className={cardClass}>
+  const isDarkUI = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const useDark = forceLight ? false : isDarkUI;
+  const gridStroke = useDark ? '#404040' : '#e5e7eb'; // neutral-700 vs gray-200
+  const axisStroke = useDark ? '#d4d4d4' : '#6b7280'; // neutral-300 vs gray-500
+  const titleClass = 'text-base font-semibold mb-3 ' + (useDark ? 'text-neutral-100' : 'text-gray-900');
+  const containerClass = forceLight ? 'bg-white rounded-lg border border-gray-200 p-4' : cardClass;
+
+  return (
+    <div className={containerClass}>
 			<div ref={chartRef}>
-				{spec?.title ? (
-					<h2 className="text-base font-semibold text-gray-900 mb-3">{spec.title}</h2>
-				) : null}
+        {spec?.title ? (
+          <h2 className={titleClass}>{spec.title}</h2>
+        ) : null}
 				<div className="w-full h-[calc(60vh-2rem)] min-h-[300px]">
 					<ResponsiveContainer>
-						<BarChart data={rows} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
-						<CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <BarChart data={rows} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
 						<XAxis
 							dataKey={xKey}
 							label={spec?.config?.xAxis?.label ? { value: spec.config.xAxis.label, position: 'insideBottom', offset: -5 } : undefined}
-							stroke="#6b7280"
+              stroke={axisStroke}
 							angle={-45}
 							textAnchor="end"
 							height={120}
 						/>
-						<YAxis stroke="#6b7280" />
+            <YAxis stroke={axisStroke} />
 						<Tooltip />
-						<Legend 
+            <Legend 
 							verticalAlign="bottom" 
 							height={50}
 							wrapperStyle={{ paddingTop: '10px', paddingBottom: '10px' }}
 						/>
 						{yKeys.map((key, index) => (
-							<Bar key={key} dataKey={key} fill={COLORS[index % COLORS.length]} radius={[4, 4, 0, 0]} />
+							<Bar 
+								key={key} 
+								dataKey={key} 
+								fill={COLORS[index % COLORS.length]} 
+								radius={[4, 4, 0, 0]}
+								stackId={isStacked ? 'stack' : undefined}
+							/>
 						))}
 						</BarChart>
 					</ResponsiveContainer>

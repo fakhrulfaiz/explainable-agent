@@ -154,8 +154,7 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
                         for tool_call in msg.tool_calls:
                             tool_name = tool_call.get('name', '')
                             tool_id = tool_call.get('id', '')
-                            
-                            # Skip empty or invalid tool calls
+            
                             if not tool_name or not tool_id:
                                 continue
                                 
@@ -220,14 +219,106 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
                             "type": "message"
                         })}
             
-            # After streaming completes, check if human feedback is needed
+            # After streaming completes, emit final payloads
             state = agent.graph.get_state(config)
+            values = getattr(state, 'values', {}) or {}
+            messages = values.get("messages", [])
+            steps = values.get("steps", [])
+            plan = values.get("plan", "")
+            query = values.get("query", "")
+            # Determine assistant final response
+            assistant_response = ""
+            for m in reversed(messages):
+                if (hasattr(m, 'content') and m.content and type(m).__name__ == 'AIMessage' and (not hasattr(m, 'tool_calls') or not m.tool_calls)):
+                    assistant_response = m.content
+                    break
+
+            # Compute checkpoint_id if present
+            checkpoint_id = None
+            try:
+                if hasattr(state, 'config') and state.config and 'configurable' in state.config:
+                    configurable = state.config['configurable']
+                    if 'checkpoint_id' in configurable:
+                        checkpoint_id = str(configurable['checkpoint_id'])
+            except Exception:
+                checkpoint_id = None
+
+            # Overall confidence
+            overall_confidence = None
+            if steps:
+                confidences = [s.get("confidence", 0.8) for s in steps if isinstance(s, dict) and "confidence" in s]
+                overall_confidence = (sum(confidences) / len(confidences)) if confidences else 0.8
+
+            # Build final_result summary
+            try:
+                from src.models.schemas import FinalResult
+                final_result_summary = FinalResult(
+                    summary=assistant_response,
+                    details=f"Executed {len(steps)} steps successfully",
+                    source="Database query execution",
+                    inference="Based on database analysis and tool execution",
+                    extra_explanation=f"Plan: {plan}"
+                )
+                final_result_dict = final_result_summary.model_dump()
+            except Exception:
+                final_result_dict = {
+                    "summary": (assistant_response[:200] + "...") if isinstance(assistant_response, str) and len(assistant_response) > 200 else assistant_response,
+                    "details": f"Executed {len(steps)} steps successfully",
+                    "source": "Database query execution",
+                    "inference": "Based on database analysis and tool execution",
+                    "extra_explanation": f"Plan: {plan}"
+                }
+
+            # Send status event (user_feedback or finished)
             if state.next and 'human_feedback' in state.next:
                 status_data = json.dumps({"status": "user_feedback"})
                 yield {"event": "status", "data": status_data}
             else:
                 status_data = json.dumps({"status": "finished"})
                 yield {"event": "status", "data": status_data}
+
+                # Emit enriched completed payload
+                completed_payload = {
+                    "success": True,
+                    "data": {
+                        "thread_id": thread_id,
+                        "checkpoint_id": checkpoint_id,
+                        "run_status": "finished",
+                        "assistant_response": assistant_response,
+                        "query": query,
+                        "plan": plan,
+                        "error": None,
+                        "steps": steps,
+                        "final_result": final_result_dict,
+                        "total_time": None,
+                        "overall_confidence": overall_confidence
+                    },
+                    "message": f"Explorer data retrieved successfully for checkpoint {checkpoint_id}" if checkpoint_id else "Explorer data retrieved successfully"
+                }
+                yield {"event": "completed", "data": json.dumps(completed_payload)}
+
+                # Visualizations follow-up
+                try:
+                    from .graph import _normalize_visualizations  # reuse normalization helper
+                except Exception:
+                    _normalize_visualizations = lambda v: v if isinstance(v, list) else []
+                visualizations = _normalize_visualizations(values.get("visualizations", []))
+                try:
+                    visualization_types = list({v.get("type") for v in visualizations if isinstance(v, dict) and v.get("type")})
+                    visualizations_payload = {
+                        "success": True,
+                        "data": {
+                            "thread_id": thread_id,
+                            "checkpoint_id": checkpoint_id,
+                            "visualizations": visualizations,
+                            "count": len(visualizations),
+                            "types": visualization_types
+                        },
+                        "message": f"Visualization data retrieved successfully for checkpoint {checkpoint_id}" if checkpoint_id else "Visualization data retrieved successfully"
+                    }
+                    yield {"event": "visualizations_ready", "data": json.dumps(visualizations_payload)}
+                except Exception:
+                    pass
                 
             # Clean up the thread configuration after streaming is complete
             if thread_id in run_configs:
