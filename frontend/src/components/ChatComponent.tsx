@@ -1072,28 +1072,30 @@ const updateMessageCallback = useCallback(
         </div>
       </div>
 
-      {/* Fixed Input Area - responsive positioning */}
-      <div className={`absolute left-0 md:left-20 right-0 z-10 transition-all duration-500 ease-in-out ${
+      {/* Fixed Input Area - viewport-centered positioning */}
+      <div className={`fixed left-0 right-0 z-10 transition-all duration-500 ease-in-out ${
         messages.length === 0 
           ? 'bottom-0 pb-3 md:top-1/2 md:transform md:-translate-y-1/2 md:flex md:items-center md:justify-center' 
           : 'bottom-0'
       }`}>
         {/* Input - always show, but change placeholder based on context */}
-        <EnhancedInput
-          value={inputValue}
-          onChange={setInputValue}
-          onSend={handleSend}
-          onKeyDown={handleKeyDown}
-          placeholder={pendingApproval ? "Your feedback..." : placeholder}
-          disabled={disabled}
-          isLoading={isLoading}
-          usePlanning={usePlanning}
-          useExplainer={useExplainer}
-          onPlanningToggle={handlePlanningToggle}
-          onExplainerToggle={handleExplainerToggle}
-          onFilesChange={handleFilesChange}
-          attachedFiles={attachedFiles}
-        />
+        <div className={`${messages.length === 0 ? 'max-w-4xl px-6' : 'max-w-3xl px-4'} w-full mx-auto`}>
+          <EnhancedInput
+            value={inputValue}
+            onChange={setInputValue}
+            onSend={handleSend}
+            onKeyDown={handleKeyDown}
+            placeholder={pendingApproval ? "Your feedback..." : placeholder}
+            disabled={disabled}
+            isLoading={isLoading}
+            usePlanning={usePlanning}
+            useExplainer={useExplainer}
+            onPlanningToggle={handlePlanningToggle}
+            onExplainerToggle={handleExplainerToggle}
+            onFilesChange={handleFilesChange}
+            attachedFiles={attachedFiles}
+          />
+        </div>
       </div>
     </div>
   );
