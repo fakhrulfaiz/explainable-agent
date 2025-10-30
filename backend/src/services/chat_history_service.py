@@ -10,11 +10,11 @@ from src.models.chat_models import (
     ChatMessage, 
     ChatThreadSummary,
     ChatThreadWithMessages,
-    CreateChatRequest,
-    AddMessageRequest
+    CreateChatRequest
 )
 from src.services.checkpoint_service import CheckpointService
 from src.repositories.messages_repository import MessagesRepository
+from src.services.message_management_service import MessageManagementService
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,18 @@ class ChatHistoryService:
             
             # Create thread object
             thread = ChatThread(
-                thread_id=thread_id,
+                thread_id=thread_id, 
                 title=request.title or "New Chat",
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
             
-            # Add initial message if provided
+            # Save thread first
+            success = await self.chat_thread_repo.create_thread(thread)
+            if not success:
+                raise Exception("Failed to create chat thread in database")
+            
+            # Add initial message if provided (after thread is created)
             if request.initial_message:
                 import time
                 initial_msg = ChatMessage(
@@ -56,12 +61,15 @@ class ChatHistoryService:
                 )
                 await self.messages_repo.add_message(initial_msg)
             
-            # Save using repository
-            success = await self.chat_thread_repo.create_thread(thread)
-            if not success:
-                raise Exception("Failed to create chat thread in database")
-            
             logger.info(f"Created new chat thread: {thread_id}")
+            
+            # Verify thread was actually created
+            try:
+                created_thread = await self.chat_thread_repo.find_by_id(thread_id, "thread_id")
+                logger.info(f"Thread verification - exists: {created_thread is not None}")
+            except Exception as e:
+                logger.error(f"Error verifying thread creation: {e}")
+            
             return thread
             
         except Exception as e:
@@ -96,45 +104,6 @@ class ChatHistoryService:
 
     
     
-    async def add_message(self, request: AddMessageRequest) -> bool:
-        
-        try:
-            # Ensure message_id is provided - generate one if not provided
-            message_id = request.message_id
-            if message_id is None:
-                import time
-                message_id = int(time.time() * 1000000)  # Microsecond precision timestamp
-                logger.warning(f"message_id was None, generated: {message_id}")
-            
-            message = ChatMessage(
-                sender=request.sender,
-                content=request.content,
-                timestamp=datetime.now(),
-                message_type=request.message_type,
-                checkpoint_id=request.checkpoint_id,
-                message_id=message_id,
-                needs_approval=request.needs_approval,
-                approved=request.approved,
-                disapproved=request.disapproved,
-                is_error=request.is_error,
-                is_feedback=request.is_feedback,
-                has_timed_out=request.has_timed_out,
-                can_retry=request.can_retry,
-                retry_action=request.retry_action,
-                thread_id=request.thread_id
-            )
-            
-            success = await self.messages_repo.add_message(message)
-            if success:
-                logger.info(f"Added message to thread {request.thread_id}")
-            else:
-                logger.warning(f"Thread {request.thread_id} not found")
-            
-            return success
-                
-        except Exception as e:
-            logger.error(f"Error adding message to thread {request.thread_id}: {e}")
-            raise Exception(f"Failed to add message: {e}")
 
     async def update_message_flags(self, thread_id: str, message_id: int, *,
                                    needs_approval: Optional[bool] = None,
@@ -186,9 +155,7 @@ class ChatHistoryService:
             thread_summaries = []
             for thread in chat_threads:
                 message_count = await self.messages_repo.count_messages_by_thread(thread.thread_id)
-                print(f"Thread {thread.thread_id}: message_count = {message_count}")
                 last_message_obj = await self.messages_repo.get_last_message_by_thread(thread.thread_id)
-                print(f"Thread {thread.thread_id}: last_message_obj = {last_message_obj}")
                 last_message = last_message_obj.content if last_message_obj else None
                 
                 thread_summary = ChatThreadSummary(

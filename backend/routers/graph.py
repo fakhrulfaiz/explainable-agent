@@ -9,9 +9,14 @@ import json
 import asyncio
 from src.models.schemas import StartRequest, GraphResponse, GraphStatusResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
-from src.services.explainable_agent import ExplainableAgent, ExplainableAgentState
+from src.services.explainable_agent2 import ExplainableAgent, ExplainableAgentState
 from langchain_core.messages import HumanMessage
 from src.models.database import get_mongo_memory, get_mongodb
+from src.repositories.dependencies import get_message_management_service
+from src.services.message_management_service import MessageManagementService
+from src.utils.approval_utils import clear_previous_approvals
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/graph",
@@ -23,7 +28,7 @@ def get_explainable_agent(request: Request) -> ExplainableAgent:
     return request.app.state.explainable_agent
 
 
-def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, config):
+async def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, config, message_service: MessageManagementService = None):
     logger = logging.getLogger(__name__)
     thread_id = config.get("configurable", {}).get("thread_id", "unknown")
     
@@ -37,10 +42,9 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
     try:
         # Use streaming instead of invoke
         if input_state is None:
-            # Resume case - continue from current state
             events = list(explainable_agent.graph.stream(None, config, stream_mode="values"))
         else:
-            # Start case - stream with initial state
+
             events = list(explainable_agent.graph.stream(input_state, config, stream_mode="values"))
         
         # Get the final state after streaming
@@ -64,6 +68,27 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
             plan = current_values.get("plan", "")
             response_type = current_values.get("response_type")  # Get response_type from state
             
+            # Save assistant message that needs approval
+            assistant_message_id = None
+            if assistant_response and message_service:
+                try:
+                    # If this is a replan, clear needs_approval from previous messages in this thread
+                    if response_type == "replan":
+                        logger.info(f"Replan detected - clearing needs_approval from previous messages in thread {thread_id}")
+                        await clear_previous_approvals(thread_id, message_service)
+                    
+                    saved_message = await message_service.save_assistant_message(
+                        thread_id=thread_id,
+                        content=assistant_response,
+                        message_type="message",
+                        checkpoint_id=checkpoint_id,
+                        needs_approval=True  # This message needs approval
+                    )
+                    assistant_message_id = saved_message.message_id
+                    logger.info(f"Saved assistant message {assistant_message_id} for approval in thread {thread_id}")
+                except Exception as e:
+                    logger.error(f"Failed to save assistant message for approval in thread {thread_id}: {e}")
+            
             return GraphResponse(
                 thread_id=thread_id,
                 checkpoint_id=checkpoint_id,
@@ -71,7 +96,8 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                 run_status=execution_status, 
                 assistant_response=assistant_response,
                 plan=plan,
-                response_type=response_type  # Include response_type in response
+                response_type=response_type,  # Include response_type in response
+                assistant_message_id=assistant_message_id  # Include message ID for frontend
             )
         else:
             execution_status = ExecutionStatus.FINISHED
@@ -122,6 +148,59 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                     extra_explanation=f"Plan: {plan}"
                 )
             
+            # Save messages to database if execution finished successfully
+            assistant_message_id = None
+            explorer_message_id = None
+            visualization_message_id = None
+            
+            if execution_status == ExecutionStatus.FINISHED and message_service:
+                try:
+                    # Save main assistant message
+                    if assistant_response:
+                        saved_message = await message_service.save_assistant_message(
+                            thread_id=thread_id,
+                            content=assistant_response,
+                            message_type="message",
+                            checkpoint_id=checkpoint_id,
+                            needs_approval=False
+                        )
+                        assistant_message_id = saved_message.message_id
+                        logger.info(f"Saved assistant message {assistant_message_id} for thread {thread_id}")
+                    
+                    # Save explorer message if steps exist
+                    if steps and len(steps) > 0:
+                        explorer_content = f"Data exploration completed with {len(steps)} steps"
+                        if final_result:
+                            explorer_content += f": {final_result.summary}"
+                        
+                        explorer_message = await message_service.save_assistant_message(
+                            thread_id=thread_id,
+                            content=explorer_content,
+                            message_type="explorer",
+                            checkpoint_id=checkpoint_id,
+                            needs_approval=False
+                        )
+                        explorer_message_id = explorer_message.message_id
+                        logger.info(f"Saved explorer message {explorer_message_id} for thread {thread_id}")
+                    
+                    # Save visualization message if visualizations exist
+                    if visualizations and len(visualizations) > 0:
+                        viz_types = list({v.get("type", "unknown") for v in visualizations if isinstance(v, dict)})
+                        viz_content = f"Generated {len(visualizations)} visualization(s): {', '.join(viz_types)}"
+                        
+                        viz_message = await message_service.save_assistant_message(
+                            thread_id=thread_id,
+                            content=viz_content,
+                            message_type="visualization",
+                            checkpoint_id=checkpoint_id,
+                            needs_approval=False
+                        )
+                        visualization_message_id = viz_message.message_id
+                        logger.info(f"Saved visualization message {visualization_message_id} for thread {thread_id}")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to save messages for thread {thread_id}: {e}")
+            
             return GraphResponse(
                 thread_id=thread_id,
                 checkpoint_id=checkpoint_id,
@@ -133,7 +212,10 @@ def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, con
                 final_result=final_result,
                 total_time=total_time,
                 overall_confidence=overall_confidence,
-                visualizations=visualizations
+                visualizations=visualizations,
+                assistant_message_id=assistant_message_id,  # Include message ID for frontend
+                explorer_message_id=explorer_message_id,  # Include explorer message ID
+                visualization_message_id=visualization_message_id  # Include visualization message ID
             )
             
     except Exception as e:
@@ -169,15 +251,18 @@ def _normalize_visualizations(visualizations: Any) -> List[Dict[str, Any]]:
         return []
 
 @router.post("/start", response_model=GraphResponse)
-def start_graph(
+async def start_graph(
     request: StartRequest,
-    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
+    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)],
+    message_service: Annotated[MessageManagementService, Depends(get_message_management_service)]
 ):
     try:
         # Use provided thread_id or generate new one
         thread_id = request.thread_id or str(uuid4())
         config = {"configurable": {"thread_id": thread_id}}
-         
+        
+        # Note: User message is saved by frontend when creating thread
+        # Only save user messages for existing threads (like feedback in /resume)
         
         initial_state = ExplainableAgentState(
             messages=[HumanMessage(content=request.human_request)],
@@ -195,7 +280,7 @@ def start_graph(
         )
         
         
-        return run_graph_and_response(agent, initial_state, config)
+        return await run_graph_and_response(agent, initial_state, config, message_service)
     except Exception as e:
         return GraphResponse(
             thread_id=thread_id if 'thread_id' in locals() else "unknown",
@@ -205,9 +290,10 @@ def start_graph(
 
 
 @router.post("/resume", response_model=GraphResponse)
-def resume_graph(
+async def resume_graph(
     request: ResumeRequest,
-    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
+    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)],
+    message_service: Annotated[MessageManagementService, Depends(get_message_management_service)]
 ):
     logger = logging.getLogger(__name__)
     config = {"configurable": {"thread_id": request.thread_id}}
@@ -225,6 +311,29 @@ def resume_graph(
             logger.warning(f"Thread {request.thread_id} is not waiting for human feedback. Current next nodes: {current_state.next}")
             raise HTTPException(status_code=400, detail=f"Graph execution for thread_id {request.thread_id} is not waiting for human feedback")
         
+        # Save user feedback message to database
+        logger.info(f"Feedback debug - message_service: {message_service is not None}, human_comment: '{request.human_comment}'")
+        
+        # Check if thread exists before trying to save message
+        if message_service:
+            try:
+                thread_exists = await message_service.chat_thread_repo.find_by_id(request.thread_id, "thread_id")
+                logger.info(f"Thread {request.thread_id} exists: {thread_exists is not None}")
+            except Exception as e:
+                logger.error(f"Error checking thread existence: {e}")
+        
+        if message_service and request.human_comment:
+            try:
+                saved_feedback = await message_service.save_user_message(
+                    thread_id=request.thread_id,
+                    content=request.human_comment
+                )
+                logger.info(f"Saved user feedback message {saved_feedback.message_id} for thread {request.thread_id}")
+            except Exception as e:
+                logger.error(f"Failed to save user feedback message for thread {request.thread_id}: {e}")
+        else:
+            logger.warning(f"Skipping feedback save - message_service: {message_service is not None}, human_comment: '{request.human_comment}'")
+        
         state_update = {"status": request.review_action}
         if request.human_comment is not None:
             state_update["human_comment"] = request.human_comment
@@ -234,7 +343,7 @@ def resume_graph(
         agent.graph.update_state(config, state_update)
         
         # Continue execution
-        return run_graph_and_response(agent, None, config)
+        return await run_graph_and_response(agent, None, config, message_service)
         
     except Exception as e:
         error_message = str(e) if e else "Unknown error occurred"

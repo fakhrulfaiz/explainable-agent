@@ -10,9 +10,14 @@ import time
 
 from src.models.schemas import StartRequest, GraphResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
-from src.services.explainable_agent import ExplainableAgent
+from src.services.explainable_agent2 import ExplainableAgent
 from langchain_core.messages import HumanMessage
-from src.services.explainable_agent import ExplainableAgentState
+from src.services.explainable_agent2 import ExplainableAgentState
+from src.repositories.dependencies import get_message_management_service
+from src.services.message_management_service import MessageManagementService
+from src.utils.approval_utils import clear_previous_approvals
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/graph/stream",
@@ -68,7 +73,9 @@ def resume_graph_streaming(request: ResumeRequest):
     )
 
 @router.get("/{thread_id}")
-async def stream_graph(request: Request, thread_id: str, agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]):
+async def stream_graph(request: Request, thread_id: str, 
+                      agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)],
+                      message_service: Annotated[MessageManagementService, Depends(get_message_management_service)]):
     # Check if thread_id exists in our configurations
     if thread_id not in run_configs:
         return {"error": "Thread ID not found. You must first call /graph/stream/create or /graph/stream/resume"}
@@ -81,6 +88,7 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
     if run_data["type"] == "start":
         event_type = "start"
         use_planning_value = run_data.get("use_planning", True)
+        
         
         initial_state = ExplainableAgentState(
             messages=[HumanMessage(content=run_data["human_request"])],
@@ -97,6 +105,20 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
         input_state = initial_state
     else:
         event_type = "resume"
+        
+        # Save user feedback message to database
+        print(f"Feedback debug - message_service: {message_service is not None}, human_comment: '{run_data.get('human_comment')}'")
+        if message_service and run_data.get("human_comment"):
+            try:
+                saved_feedback = await message_service.save_user_message(
+                    thread_id=thread_id,
+                    content=run_data["human_comment"]
+                )
+                print(f"Saved user feedback message {saved_feedback.message_id} for thread {thread_id}")
+            except Exception as e:
+                print(f"Failed to save user feedback message for thread {thread_id}: {e}")
+        else:
+            print(f"Skipping feedback save - message_service: {message_service is not None}, human_comment: '{run_data.get('human_comment')}'")
         
         state_update = {"status": run_data["review_action"]}
         if run_data["human_comment"] is not None:
@@ -156,6 +178,10 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
                             tool_id = tool_call.get('id', '')
             
                             if not tool_name or not tool_id:
+                                continue
+                            
+                            # Exclude specific tools from streaming
+                            if tool_name == 'transfer_to_data_exploration':
                                 continue
                                 
                             tool_call_data = json.dumps({
@@ -271,11 +297,74 @@ async def stream_graph(request: Request, thread_id: str, agent: Annotated[Explai
 
             # Send status event (user_feedback or finished)
             if state.next and 'human_feedback' in state.next:
+                # Save assistant message that needs approval when waiting for user feedback
+                if assistant_response and message_service:
+                    try:
+                        # Check if this is a replan and clear previous approval flags
+                        response_type = values.get("response_type")
+                        if response_type == "replan":
+                            logger.info(f"Replan detected in streaming - clearing needs_approval from previous messages in thread {thread_id}")
+                            await clear_previous_approvals(thread_id, message_service)
+                        
+                        saved_message = await message_service.save_assistant_message(
+                            thread_id=thread_id,
+                            content=assistant_response,
+                            message_type="message",
+                            checkpoint_id=checkpoint_id,
+                            needs_approval=True  # This message needs approval
+                        )
+                        logger.info(f"Saved assistant message {saved_message.message_id} for approval in thread {thread_id}")
+                    except Exception as e:
+                        logger.error(f"Failed to save assistant message for approval in thread {thread_id}: {e}")
+                
                 status_data = json.dumps({"status": "user_feedback"})
                 yield {"event": "status", "data": status_data}
             else:
                 status_data = json.dumps({"status": "finished"})
                 yield {"event": "status", "data": status_data}
+
+                # Save messages to database when execution finishes
+                try:
+                    # Save main assistant message
+                    if assistant_response:
+                        await message_service.save_assistant_message(
+                            thread_id=thread_id,
+                            content=assistant_response,
+                            message_type="message",
+                            checkpoint_id=checkpoint_id,
+                            needs_approval=False
+                        )
+                    
+                    # Save explorer message if steps exist
+                    if steps and len(steps) > 0:
+                        explorer_content = f"Data exploration completed with {len(steps)} steps"
+                        if final_result_dict:
+                            explorer_content += f": {final_result_dict.get('summary', '')}"
+                        
+                        await message_service.save_assistant_message(
+                            thread_id=thread_id,
+                            content=explorer_content,
+                            message_type="explorer",
+                            checkpoint_id=checkpoint_id,
+                            needs_approval=False
+                        )
+                    
+                    # Save visualization message if visualizations exist
+                    visualizations = values.get("visualizations", [])
+                    if visualizations and len(visualizations) > 0:
+                        viz_types = list({v.get("type", "unknown") for v in visualizations if isinstance(v, dict)})
+                        viz_content = f"Generated {len(visualizations)} visualization(s): {', '.join(viz_types)}"
+                        
+                        await message_service.save_assistant_message(
+                            thread_id=thread_id,
+                            content=viz_content,
+                            message_type="visualization",
+                            checkpoint_id=checkpoint_id,
+                            needs_approval=False
+                        )
+                        
+                except Exception as e:
+                    print(f"Failed to save messages for thread {thread_id}: {e}")
 
                 # Emit enriched completed payload
                 completed_payload = {

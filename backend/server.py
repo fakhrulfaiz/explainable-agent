@@ -75,7 +75,14 @@ async def lifespan(app: FastAPI):
     llm = llm_service.get_current_llm()
     logger.info(f"✅ Using LLM: {llm_service.get_current_config()}")
 
-    # Create agent instances
+    # Initialize MessageManagementService
+    from src.repositories.dependencies import get_message_management_service, get_messages_repository, get_chat_thread_repository
+    from pymongo.database import Database
+    
+    # Get database instance
+    db = mongodb_manager.get_database()
+    
+    # Create agent instances (message service will be injected via dependency injection)
     explainable_agent = ExplainableAgent(
         llm=llm,
         db_path=settings.database_path,

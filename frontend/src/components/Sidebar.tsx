@@ -175,8 +175,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               title="Expand sidebar"
             >
               <PanelLeftOpen className="h-5 w-5" />
-            </Button>
-
+              </Button>
             <Separator className="bg-gray-200 dark:bg-neutral-700 w-12" />
 
             {/* New Chat Button */}

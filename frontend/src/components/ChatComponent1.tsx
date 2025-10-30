@@ -5,7 +5,7 @@ import { useUIState } from '../contexts/UIStateContext';
 import Message from './Message';
 import FeedbackForm from './FeedbackForm';
 import LoadingIndicator from './LoadingIndicator';
-import EnhancedInput from './EnhancedInput';
+import InputForm from './InputForm';
 import '../styles/scrollbar.css';
 
 // Ephemeral tool indicator component - shows step history
@@ -293,7 +293,7 @@ const appendToMessageContent = useCallback(
       } else {
       const messageContent = handleResponse(response);
       const assistantMessage: MessageType = {
-        id: Date.now() + 1,
+        id: response.backendMessageId || Date.now() + 1, // Use backend ID if available
         role: 'assistant',
         content: messageContent,
         timestamp: new Date(),
@@ -620,8 +620,11 @@ const appendToMessageContent = useCallback(
           } else {
           const messageContent = handleResponse(result as HandlerResponse);
           const needsApproval = (result as HandlerResponse).needsApproval || false;
+          const backendId = (result as HandlerResponse).backendMessageId;
+          const tempId = Date.now() + 1;
+          const finalId = backendId || tempId;
           const resultMessage: MessageType = {
-            id: Date.now() + 1,
+            id: finalId,  // Use backend ID if available
             role: 'assistant',
             content: messageContent,
             timestamp: new Date(),
@@ -1189,7 +1192,7 @@ const appendToMessageContent = useCallback(
             </button>
           </div>
         ) : !showFeedbackForm ? (
-          <EnhancedInput
+          <InputForm
             value={inputValue}
             onChange={setInputValue}
             onSend={handleSend}

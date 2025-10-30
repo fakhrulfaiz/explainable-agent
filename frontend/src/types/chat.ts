@@ -30,6 +30,9 @@ export interface HandlerResponse {
   visualizations?: any[];
   checkpoint_id?: string; // Add checkpoint ID for both explorer and visualization messages
   response_type?: 'answer' | 'replan' | 'cancel';  // Type of response from backend
+  backendMessageId?: number; // Backend-generated message ID for assistant messages
+  explorerMessageId?: number; // Backend-generated message ID for explorer messages
+  visualizationMessageId?: number; // Backend-generated message ID for visualization messages
   // New streaming properties
   isStreaming?: boolean;
   streamingHandler?: (
@@ -112,6 +115,7 @@ export interface GraphResponse {
   overall_confidence?: number;
   response_type?: 'answer' | 'replan' | 'cancel';  // Type of response from planner
   visualizations?: any[]; // Visualization specs for frontend rendering
+  assistant_message_id?: number; // Backend-generated message ID for assistant messages
 }
 
 export interface GraphStatus {

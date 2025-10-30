@@ -85,7 +85,7 @@ class ExplainableAgent:
                 "- For database/SQL related queries and visualizations, use transfer_to_data_exploration\n"
                 "- Be helpful and direct in your routing decisions\n"
                 "- IMPORTANT: Only route to agents when you receive a NEW user message, not for agent responses\n"
-                "- CRITICAL: Make only ONE tool call per user message. Pass the full task in a single call.\n"
+                "- CRITICAL: ONLY USE ONE TOOL CALL PER USER MESSAGE. PASS THE FULL TASK IN A SINGLE CALL. DO NOT SEPARATE THE TASK INTO MULTIPLE TOOL CALLS.\n"
                 "- The specialized agent will handle all aspects of the request (multiple charts, queries, etc.)\n"
                 "- Example: If user asks for '3 different charts', call the transfer tool ONCE with the full request\n"
             ),

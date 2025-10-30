@@ -4,7 +4,7 @@ import { Message as MessageType, ChatComponentProps, HandlerResponse } from '../
 import { useUIState } from '../contexts/UIStateContext';
 import Message from './Message';
 import LoadingIndicator from './LoadingIndicator';
-import EnhancedInput from './EnhancedInput';
+import InputForm from './InputForm';
 import ThreadTitle from './ThreadTitle';
 import '../styles/scrollbar.css';
 
@@ -74,6 +74,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Streaming UI state
   const [streamingActive, setStreamingActive] = useState<boolean>(false);
+  const useStreaming = state.useStreaming;
   
   // Enhanced input state
   const [usePlanning, setUsePlanning] = useState<boolean>(false);
@@ -356,9 +357,16 @@ const updateMessageCallback = useCallback(
       setMessages(prev => [...prev, feedbackMessage]);
       setInputValue('');
       
+      // Call onMessageCreated for the feedback message
+      if (typeof onMessageCreated === 'function') {
+        onMessageCreated(feedbackMessage);
+      }
+      
       // Call the feedback handler
       if (onFeedback) {
+        console.log('onFeedback was called');
         const result = await onFeedback(userMessage, message);
+        console.log('result', result);
         // Handle the result similar to handleSendFeedback
         if (result) {
           if ((result as HandlerResponse).isStreaming && (result as HandlerResponse).streamingHandler) {
@@ -401,8 +409,13 @@ const updateMessageCallback = useCallback(
             });
             setStreamingActive(false);
           } else {
+            // Use backend message ID if available, otherwise generate one
+            const backendId = (result as HandlerResponse).backendMessageId;
+            const tempId = Date.now();
+            const finalId = backendId !== undefined && backendId !== null ? backendId : tempId;
+            
             const assistantMessage: MessageType = {
-              id: Date.now(),
+              id: finalId,
               role: 'assistant',
               content: (result as HandlerResponse).message || 'Response received',
               timestamp: new Date(),
@@ -424,8 +437,9 @@ const updateMessageCallback = useCallback(
     setInputValue('');
     setPendingApproval(null);
 
+    const tempUserId = Date.now();
     const newUserMessage: MessageType = {
-      id: Date.now(),
+      id: tempUserId,
       role: 'user',
       content: userMessage,
       timestamp: new Date(),
@@ -463,6 +477,30 @@ const updateMessageCallback = useCallback(
             // Handle tool events
             handleToolEvents(status, eventData, streamingMsgId);
             
+            // Handle error status from agent and append error message
+            if (status === 'error') {
+              let errorText = '';
+              try {
+                if (eventData) {
+                  const parsed = JSON.parse(eventData);
+                  errorText = parsed?.error || parsed?.message || String(eventData);
+                }
+              } catch {
+                errorText = eventData || 'Unknown error';
+              }
+              setMessages(prev => prev.map(m => 
+                m.id === streamingMsgId
+                  ? { 
+                      ...m,
+                      content: (m.content || '') + (errorText ? `\nError: ${errorText}` : ''),
+                      isError: true,
+                      isStreaming: false
+                    }
+                  : m
+              ));
+              return;
+            }
+
             if (status === 'finished' || status === 'user_feedback') {
               setToolStepHistory(null);
               
@@ -482,10 +520,8 @@ const updateMessageCallback = useCallback(
             }
 
             if (status === 'completed_payload') {
-              console.log("🔧 FRONTEND: Status event payload:", status);
             }
             else if (status === 'visualizations_ready') {
-              console.log("🔧 FRONTEND: Status event payload:", status);
             }
             
             
@@ -497,8 +533,11 @@ const updateMessageCallback = useCallback(
         }
       } else {
       const messageContent = handleResponse(response);
+      const backendId = response.backendMessageId;
+      const tempId = Date.now() + 1;
+      const finalId = backendId || tempId;
       const assistantMessage: MessageType = {
-        id: Date.now() + 1,
+        id: finalId, // Use backend ID if available
         role: 'assistant',
         content: messageContent,
         timestamp: new Date(),
@@ -590,6 +629,30 @@ const updateMessageCallback = useCallback(
                   });
                 }
                 
+                // Handle error status from agent and append error message
+                if (status === 'error') {
+                  let errorText = '';
+                  try {
+                    if (eventData) {
+                      const parsed = JSON.parse(eventData);
+                      errorText = parsed?.error || parsed?.message || String(eventData);
+                    }
+                  } catch {
+                    errorText = eventData || 'Unknown error';
+                  }
+                  setMessages(prev => prev.map(m => 
+                    m.id === streamingMsgId
+                      ? { 
+                          ...m,
+                          content: (m.content || '') + (errorText ? `\nError: ${errorText}` : ''),
+                          isError: true,
+                          isStreaming: false
+                        }
+                      : m
+                  ));
+                  return;
+                }
+
                 
                 if (status === 'tool_result' && eventData) {
                   const resultData = JSON.parse(eventData);
@@ -639,18 +702,23 @@ const updateMessageCallback = useCallback(
             }
           } else {
           const messageContent = handleResponse(result as HandlerResponse);
-          const resultMessage: MessageType = {
-            id: Date.now() + 1,
+          const backendId = (result as HandlerResponse).backendMessageId;
+          const needsApproval = (result as HandlerResponse).needsApproval || false;
+          const tempId = Date.now() + 1;
+          const finalId = backendId || tempId;
+            const resultMessage: MessageType = {
+            id: finalId,
             role: 'assistant',
             content: messageContent,
-            timestamp: new Date()
+            timestamp: new Date(),
+            needsApproval: needsApproval,
+            threadId: contextThreadId || currentThreadId || undefined
           };
           setMessages(prev => [...prev, resultMessage]);
             if (typeof onMessageCreated === 'function') {
               onMessageCreated(resultMessage);
             }
             
-            // Non-streaming case - update message flags after successful approval
             await updateMessageFlags(messageId, { approved: true, needsApproval: false });
           }
         }
@@ -688,141 +756,6 @@ const updateMessageCallback = useCallback(
       }
   };
 
-  const handleFeedback = async (messageId: number): Promise<void> => {
-    const message = messages.find(m => m.id === messageId);
-    if (!message) return;
-    
-    // Only allow providing feedback for messages that need approval
-    if (!message.needsApproval) {
-      return;
-    }
-
-    // DON'T clear needsApproval yet - keep it so user can still approve after clarification
-    // It will be cleared only if a new plan is generated
-
-    try {
-      // Call parent handler
-      if (onFeedback) {
-        const result = await onFeedback(message.content, message);
-        if (result) {
-          if ((result as HandlerResponse).isStreaming && (result as HandlerResponse).streamingHandler) {
-            const streamingMsgId = Date.now() + 1;
-            const streamingMessage: MessageType = {
-              id: streamingMsgId,
-              role: 'assistant',
-              content: '',
-              timestamp: new Date(),
-              threadId: message.threadId || contextThreadId || currentThreadId || undefined,
-              isStreaming: true
-            } as any;
-            setMessages(prev => [...prev, streamingMessage]);
-            setStreamingActive(true);
-            try {
-              await (result as HandlerResponse).streamingHandler!(streamingMsgId, updateMessageCallback, (status, eventData, responseType) => {
-                if (!status) return;
-                
-                // Handle tool events
-                handleToolEvents(status, eventData, streamingMsgId);
-                
-                // Clear all tool indicators when streaming finishes
-                if (status === 'finished' || status === 'user_feedback') {
-                  setToolStepHistory(null);
-                  
-                  setMessages(prev => prev.map(m => {
-                    if (m.id === streamingMsgId) {
-                      // Update the streaming message
-                      // Only needs approval if response_type is 'replan'
-                      const needsApproval = status === 'user_feedback' && responseType === 'replan';
-                      return { 
-                        ...m, 
-                        isStreaming: status !== 'finished', 
-                        needsApproval: needsApproval
-                      };
-                    }
-                    // If new plan generated (response_type === 'replan'), clear old plan's needsApproval
-                    if (status === 'user_feedback' && responseType === 'replan' && m.id === messageId) {
-                      return { ...m, needsApproval: false };
-                    }
-                    return m;
-                  }));
-                  
-                  if (status === 'user_feedback' && responseType === 'replan') {
-                    setPendingApproval(streamingMsgId);
-                  }
-                  // Note: For clarifications, pendingApproval will be auto-set by useEffect
-                }
-              });
-            } catch (streamErr) {
-              setMessages(prev => prev.map(m => 
-                m.id === streamingMsgId
-                  ? { ...m, content: `Error: ${(streamErr as Error).message || 'Streaming failed'}`, isError: true, isStreaming: false }
-                  : m
-              ));
-              if (typeof onMessageCreated === 'function') {
-                const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
-                if (finalMsg) onMessageCreated(finalMsg);
-              }
-            } finally {
-              setStreamingActive(false);
-            }
-          } else {
-          const messageContent = handleResponse(result as HandlerResponse);
-          const needsApproval = (result as HandlerResponse).needsApproval || false;
-          const resultMessage: MessageType = {
-            id: Date.now() + 1,
-            role: 'assistant',
-            content: messageContent,
-            timestamp: new Date(),
-            needsApproval: needsApproval
-          };
-          
-          // Only clear old plan's needsApproval if this is a NEW plan (replan), not a clarification
-          if (needsApproval && (result as HandlerResponse).response_type === 'replan') {
-            setMessages(prev => prev.map(m => 
-              m.id === messageId 
-                ? { ...m, needsApproval: false }
-                : m
-            ));
-          }
-          
-          setMessages(prev => [...prev, resultMessage]);
-          if (typeof onMessageCreated === 'function') {
-            const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
-            if (finalMsg) onMessageCreated(finalMsg);
-          }
-          if (needsApproval) {
-            setPendingApproval(resultMessage.id);
-          }
-          }
-        }
-      }
-    } catch (error) {
-      const isTimeout = isTimeoutError(error as Error);
-      
-      if (isTimeout) {
-        // Mark the message as timed out and retryable
-        await updateMessageFlags(messageId, {
-          disapproved: false, 
-          hasTimedOut: true, 
-          canRetry: true, 
-          retryAction: 'feedback'
-        });
-      } else {
-        // Add error message for non-timeout errors
-        const errorMessage: MessageType = {
-          id: Date.now() + 1,
-          role: 'assistant',
-          content: `Error during feedback: ${(error as Error).message || 'Something went wrong'}`,
-          timestamp: new Date(),
-          isError: true
-        };
-
-        setMessages(prev => [...prev, errorMessage]);
-      }
-    } finally {
-      setLoading(false);
-      }
-  };
 
   const handleCancel = async (messageId: number): Promise<void> => {
     // If messageId is 0, find the latest message that needs approval
@@ -895,11 +828,9 @@ const updateMessageCallback = useCallback(
   const handleRetry = async (messageId: number): Promise<void> => {
     const message = messages.find(m => m.id === messageId);
     if (!message || !message.canRetry || !message.retryAction) {
-      console.log('Retry blocked:', { message, canRetry: message?.canRetry, retryAction: message?.retryAction });
       return;
     }
 
-    console.log('Starting retry for message:', messageId, 'action:', message.retryAction);
 
     // Clear the timeout state and restore the message to its pre-timeout state
     await updateMessageFlags(messageId, {
@@ -937,7 +868,35 @@ const updateMessageCallback = useCallback(
         if (message.retryAction === 'approve') {
           await handleApprove(messageId);
         } else if (message.retryAction === 'feedback') {
-          await handleFeedback(messageId);
+          // For feedback retry, we need to provide feedback content
+          // Since we don't have the original feedback content, we'll use a generic message
+          if (onFeedback) {
+            const result = await onFeedback('Retrying previous action', message);
+            if (result) {
+              const messageContent = handleResponse(result as HandlerResponse);
+              const needsApproval = (result as HandlerResponse).needsApproval || false;
+              const backendId = (result as HandlerResponse).backendMessageId;
+              const tempId = Date.now() + 1;
+              const finalId = backendId !== undefined && backendId !== null ? backendId : tempId;
+              
+              const resultMessage: MessageType = {
+                id: finalId,
+                role: 'assistant',
+                content: messageContent,
+                timestamp: new Date(),
+                needsApproval: needsApproval,
+                threadId: contextThreadId || currentThreadId || undefined
+              };
+              
+              setMessages(prev => [...prev, resultMessage]);
+              if (typeof onMessageCreated === 'function') {
+                onMessageCreated(resultMessage);
+              }
+              if (needsApproval) {
+                setPendingApproval(resultMessage.id);
+              }
+            }
+          }
         }
       }
     } catch (error) {
@@ -1063,7 +1022,7 @@ const updateMessageCallback = useCallback(
           ))}
 
         {/* Loading indicator */}
-        { isLoading && (
+        {!useStreaming && isLoading && (
           <LoadingIndicator 
             activeTools={toolStepHistory?.steps.filter(s => s.status === 'calling').map(s => s.name)} 
           />
@@ -1080,7 +1039,7 @@ const updateMessageCallback = useCallback(
       }`}>
         {/* Input - always show, but change placeholder based on context */}
         <div className={`${messages.length === 0 ? 'max-w-4xl px-6' : 'max-w-3xl px-4'} w-full mx-auto`}>
-          <EnhancedInput
+          <InputForm
             value={inputValue}
             onChange={setInputValue}
             onSend={handleSend}

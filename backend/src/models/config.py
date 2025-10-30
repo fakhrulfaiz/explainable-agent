@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     langsmith_endpoint: str = "https://api.smith.langchain.com"
     
     # Database Configuration
-    database_path: str = "src/resource/sakila.db"
+    database_path: str = "src/resource/chinook.db"
     
     # MongoDB Configuration
     mongo_host: str = "mongodb"

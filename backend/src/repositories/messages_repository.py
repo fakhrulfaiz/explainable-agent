@@ -17,15 +17,33 @@ class MessagesRepository(BaseRepository[ChatMessage]):
     
     async def _create_indexes(self) -> None:
         try:
-            # Create unique index on message_id - all messages must have a unique message_id
-            await self.collection.create_index("message_id", unique=True)
-            await self.collection.create_index("thread_id")
-            await self.collection.create_index([("thread_id", 1), ("timestamp", 1)])
-            await self.collection.create_index([("thread_id", 1), ("timestamp", -1)])
-            await self.collection.create_index([("updated_at", -1)])
-            await self.collection.create_index([("created_at", -1)])
-            await self.collection.create_index([("sender", 1), ("timestamp", -1)])
-            await self.collection.create_index("message_type")
+            # Core indexes for message identification and retrieval
+            await self.collection.create_index("message_id", unique=True, name="idx_message_id_unique")
+            await self.collection.create_index("thread_id", name="idx_thread_id")
+            
+            # Compound indexes for efficient thread-based queries
+            await self.collection.create_index([("thread_id", 1), ("timestamp", 1)], name="idx_thread_timestamp_asc")
+            await self.collection.create_index([("thread_id", 1), ("timestamp", -1)], name="idx_thread_timestamp_desc")
+            await self.collection.create_index([("thread_id", 1), ("sender", 1), ("timestamp", -1)], name="idx_thread_sender_timestamp")
+            
+            # Status-based filtering indexes for message management
+            await self.collection.create_index([("thread_id", 1), ("needs_approval", 1)], name="idx_thread_approval")
+            await self.collection.create_index([("thread_id", 1), ("is_error", 1)], name="idx_thread_error")
+            await self.collection.create_index([("thread_id", 1), ("message_type", 1)], name="idx_thread_message_type")
+            
+            # Performance indexes for common queries
+            await self.collection.create_index([("sender", 1), ("timestamp", -1)], name="idx_sender_timestamp")
+            await self.collection.create_index([("message_type", 1), ("timestamp", -1)], name="idx_message_type_timestamp")
+            await self.collection.create_index([("checkpoint_id", 1)], sparse=True, name="idx_checkpoint_id")
+            
+            # Audit and maintenance indexes
+            await self.collection.create_index([("updated_at", -1)], name="idx_updated_at")
+            await self.collection.create_index([("created_at", -1)], name="idx_created_at")
+            
+            # Text search index for message content (optional, for future search features)
+            # await self.collection.create_index([("content", "text")], name="idx_content_text")
+            
+            logger.info("Successfully created optimized message indexes")
         except PyMongoError as e:
             logger.warning(f"Could not create messages indexes: {e}")
     

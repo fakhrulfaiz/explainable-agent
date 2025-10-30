@@ -16,7 +16,6 @@ const ChatWithApproval: React.FC = () => {
   const useStreaming = state.useStreaming;
   React.useEffect(() => {
     // Observe context value updates
-    console.log('useStreaming state now:', useStreaming);
   }, [useStreaming]);
   
  // Local state for UI-specific concerns
@@ -189,33 +188,8 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  const handleMessageCreated = async (msg: Message) => {
-    // Use the ref to get the most current thread ID, avoiding race conditions
-    const threadId = currentThreadIdRef.current || state.currentThreadId || selectedChatThreadId || msg.threadId;
-    if (!threadId) {
-      return;
-    }
-    try {
-      await ChatHistoryService.addMessage({
-        thread_id: threadId,
-        sender: msg.role,
-        content: msg.content,
-        message_type: msg.messageType as any,
-        checkpoint_id: msg.checkpointId || undefined,
-        message_id: msg.id || undefined,
-        needs_approval: msg.needsApproval || undefined,
-        approved: msg.approved || undefined,
-        disapproved: msg.disapproved || undefined,
-        is_error: msg.isError || undefined,
-        is_feedback: msg.isFeedback || undefined,
-        has_timed_out: msg.hasTimedOut || undefined,
-        can_retry: msg.canRetry || undefined,
-        retry_action: msg.retryAction || undefined
-
-      });
-    } catch (e) {
-      console.error('Failed to persist message:', e);
-    }
+  const handleMessageCreated = async (_msg: Message) => {
+    // All messages (user and assistant) are now saved by backend during graph execution
   };
 
   const handleMessageUpdated = async (msg: Message) => {
@@ -240,11 +214,9 @@ const ChatWithApproval: React.FC = () => {
         retry_action: msg.retryAction
       });
       
-      console.log('Message flags updated in database:', msg.id, 'in thread:', threadId);
     } catch (error) {
       console.error('Failed to update message flags in database:', error);
-      // The UI state has already been updated, so we don't need to revert it
-      // This provides a better user experience even if the backend update fails
+   
     }
   };
 
@@ -397,7 +369,6 @@ const ChatWithApproval: React.FC = () => {
         human_comment: humanComment
       });
 
-      console.log('Resumed streaming for thread:', threadId, 'reviewAction:', reviewAction, 'humanComment:', humanComment);
 
       eventSourceRef.current = GraphService.streamResponse(
         threadId,
@@ -474,7 +445,6 @@ const ChatWithApproval: React.FC = () => {
           throw error;
         },
         () => {
-          console.log('Resume streaming completed');
           setLoading(false);
         }
       );
@@ -509,15 +479,9 @@ const ChatWithApproval: React.FC = () => {
         setSelectedChatThreadId(chatThreadId);
         setThreadId(chatThreadId);
       } else {
-        // Make sure ref is updated even for existing threads
         currentThreadIdRef.current = chatThreadId;
       }
-      // Check for active graph
-      const hasActiveGraph = await GraphService.hasActiveGraph(chatThreadId);
-      if (hasActiveGraph) {
-        throw new Error('There\'s already an active graph execution for this thread. Please wait for it to complete or provide feedback.');
-      }
-
+      
       if (!useStreaming) {
         // Original blocking API call
         const response = await GraphService.startGraph({
@@ -535,7 +499,8 @@ const ChatWithApproval: React.FC = () => {
 
           return {
             message: assistantResponse,
-            needsApproval: true
+            needsApproval: true,
+            backendMessageId: response.assistant_message_id // Pass backend message ID
           };
         } else if (response.run_status === 'finished') {
           setExecutionStatus('finished');
@@ -584,8 +549,6 @@ const ChatWithApproval: React.FC = () => {
   };
 
   const handleApprove = async (_content: string, message: Message): Promise<HandlerResponse> => {
-    console.log('Approval attempt:', { messageId: message.id });
-    
     const threadId = currentThreadIdRef.current || state.currentThreadId || selectedChatThreadId || message.threadId;
     
     if (!threadId) {
@@ -593,7 +556,6 @@ const ChatWithApproval: React.FC = () => {
     }
 
     try {
-      console.log('Approving plan for thread:', threadId, 'useStreaming:', useStreaming);
       setLoading(true);
       setExecutionStatus('running');
 
@@ -674,19 +636,15 @@ const ChatWithApproval: React.FC = () => {
         const response = await GraphService.provideFeedbackAndContinue(threadId, content);
         
         if (response.run_status === 'user_feedback') {
-          const responseMessage = response.assistant_response || response.plan || 'Response generated';
-          
-          // Check response_type to determine if it needs approval
-          // "replan" = new plan that needs approval
-          // "answer" = clarification that doesn't need approval
+          const responseMessage = response.assistant_response || response.plan || 'Response generated';   
           const needsApproval = response.response_type === 'replan';
           
-          // User feedback message will be stored automatically by ChatComponent via onMessageCreated
           
           return {
             message: responseMessage,
             needsApproval: needsApproval,
-            response_type: response.response_type
+            response_type: response.response_type,
+            backendMessageId: response.assistant_message_id // Include backend message ID for replan
           };
           
         } else if (response.run_status === 'finished') {
@@ -746,7 +704,6 @@ const ChatWithApproval: React.FC = () => {
   };
 
   const handleCancel = async (_content: string, message: Message): Promise<string> => {
-    console.log('Cancel attempt:', { messageId: message.id });
     
     const threadId = currentThreadIdRef.current || state.currentThreadId || selectedChatThreadId || message.threadId;
     
@@ -755,7 +712,6 @@ const ChatWithApproval: React.FC = () => {
     }
 
     try {
-      console.log('Cancelling execution for thread:', threadId);
       
       await GraphService.cancelExecution(threadId);
       
@@ -768,7 +724,6 @@ const ChatWithApproval: React.FC = () => {
   };
 
   const handleRetry = async (message: Message): Promise<HandlerResponse | void> => {
-    console.log('Retry attempt:', { messageId: message.id, retryAction: message.retryAction, threadId: message.threadId });
     
     const threadId = message.threadId || state.currentThreadId;
     
@@ -780,10 +735,8 @@ const ChatWithApproval: React.FC = () => {
       let response;
       
       if (message.retryAction === 'approve') {
-        console.log('Retrying approval for thread:', threadId);
         response = await GraphService.approveAndContinue(threadId);
       } else if (message.retryAction === 'feedback') {
-        console.log('Retrying feedback for thread:', threadId);
         response = await GraphService.provideFeedbackAndContinue(threadId, 'Retrying previous action');
       } else {
         throw new Error('Unknown retry action');

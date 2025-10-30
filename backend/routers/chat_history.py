@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 from src.services.chat_history_service import ChatHistoryService
-from src.repositories.dependencies import get_chat_history_service
+from src.services.message_management_service import MessageManagementService
+from src.repositories.dependencies import get_chat_history_service, get_message_management_service
 from src.models.chat_models import (
     ChatHistoryResponse,
     ChatListResponse,
     CreateChatRequest,
-    AddMessageRequest,
     ChatThread
 )
 from pydantic import BaseModel
@@ -26,9 +26,14 @@ async def create_chat_thread(
     chat_service: ChatHistoryService = Depends(get_chat_history_service)
 ):
     try:
+        logger.info(f"Creating chat thread with title: '{request.title}', initial_message: '{request.initial_message}'")
         thread = await chat_service.create_thread(request)
+        logger.info(f"Thread created successfully: {thread.thread_id}")
+        
         # Convert ChatThread to ChatThreadWithMessages by getting the full thread data
         thread_with_messages = await chat_service.get_thread(thread.thread_id)
+        logger.info(f"Retrieved thread with messages: {thread_with_messages is not None}")
+        
         return ChatHistoryResponse(
             success=True,
             data=thread_with_messages,
@@ -48,8 +53,6 @@ async def get_all_chat_threads(
   
     try:
         threads = await chat_service.get_all_threads_summary(limit=limit, skip=skip)
-        if threads:
-            print("/last message", threads[0].last_message)
         total = await chat_service.get_thread_count()
         return ChatListResponse(
             success=True,
@@ -84,26 +87,6 @@ async def get_chat_thread(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/add-message", response_model=dict)
-async def add_message_to_thread(
-    request: AddMessageRequest,
-    chat_service: ChatHistoryService = Depends(get_chat_history_service)
-):
-    """Add a message to an existing chat thread"""
-    try:
-        success = await chat_service.add_message(request)
-        if not success:
-            raise HTTPException(status_code=404, detail="Chat thread not found")
-        
-        return {
-            "success": True,
-            "message": "Message added successfully"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error adding message to thread {request.thread_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/thread/{thread_id}/title", response_model=dict)
@@ -222,4 +205,130 @@ async def restore_chat_thread(
         raise
     except Exception as e:
         logger.error(f"Error restoring chat thread {thread_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Message Status Synchronization Endpoints
+
+class MessageStatusUpdateRequest(BaseModel):
+    needs_approval: Optional[bool] = None
+    approved: Optional[bool] = None
+    disapproved: Optional[bool] = None
+    is_error: Optional[bool] = None
+    is_feedback: Optional[bool] = None
+    has_timed_out: Optional[bool] = None
+    can_retry: Optional[bool] = None
+    retry_action: Optional[str] = None
+
+
+@router.put("/thread/{thread_id}/message/{message_id}/status", response_model=dict)
+async def update_message_status(
+    thread_id: str,
+    message_id: int,
+    request: MessageStatusUpdateRequest,
+    message_service: MessageManagementService = Depends(get_message_management_service)
+):
+    """
+    Update message status flags. This endpoint allows the frontend to sync
+    message status with the backend for consistency.
+    """
+    try:
+        # Convert request to dict, excluding None values
+        status_updates = {k: v for k, v in request.dict().items() 
+                         if v is not None}
+        
+        if not status_updates:
+            raise HTTPException(status_code=400, detail="No valid status updates provided")
+        
+        success = await message_service.update_message_status(
+            thread_id=thread_id,
+            message_id=message_id,
+            **status_updates
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Message not found")
+        
+        return {
+            "success": True,
+            "message": "Message status updated successfully",
+            "updated_fields": list(status_updates.keys())
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating message status for thread {thread_id}, message {message_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/thread/{thread_id}/message/{message_id}/error", response_model=dict)
+async def mark_message_error(
+    thread_id: str,
+    message_id: int,
+    error_message: Optional[str] = None,
+    message_service: MessageManagementService = Depends(get_message_management_service)
+):
+    """
+    Mark a message as having an error. This is useful for handling
+    failed operations or timeout scenarios.
+    """
+    try:
+        success = await message_service.mark_message_error(
+            thread_id=thread_id,
+            message_id=message_id,
+            error_message=error_message
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Message not found")
+        
+        return {
+            "success": True,
+            "message": "Message marked as error successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking message as error for thread {thread_id}, message {message_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/thread/{thread_id}/messages/status", response_model=dict)
+async def get_messages_status(
+    thread_id: str,
+    message_service: MessageManagementService = Depends(get_message_management_service)
+):
+    """
+    Get status information for all messages in a thread. This helps
+    the frontend sync its local state with the backend.
+    """
+    try:
+        messages = await message_service.get_thread_messages(thread_id)
+        
+        status_info = []
+        for message in messages:
+            status_info.append({
+                "message_id": message.message_id,
+                "sender": message.sender,
+                "timestamp": message.timestamp.isoformat(),
+                "needs_approval": message.needs_approval,
+                "approved": message.approved,
+                "disapproved": message.disapproved,
+                "is_error": message.is_error,
+                "is_feedback": message.is_feedback,
+                "has_timed_out": message.has_timed_out,
+                "can_retry": message.can_retry,
+                "retry_action": message.retry_action,
+                "message_type": message.message_type,
+                "checkpoint_id": message.checkpoint_id
+            })
+        
+        return {
+            "success": True,
+            "thread_id": thread_id,
+            "message_count": len(status_info),
+            "messages": status_info
+        }
+    except Exception as e:
+        logger.error(f"Error getting message status for thread {thread_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

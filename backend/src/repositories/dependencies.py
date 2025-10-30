@@ -6,6 +6,7 @@ from .chat_thread_repository import ChatThreadRepository
 from .checkpoint_repository import CheckpointWriteRepository, CheckpointRepository
 from src.services.chat_history_service import ChatHistoryService
 from src.services.checkpoint_service import CheckpointService
+from src.services.message_management_service import MessageManagementService
 from src.repositories.messages_repository import MessagesRepository
 
 # Repository Dependencies
@@ -47,4 +48,10 @@ async def get_chat_history_service(
     messages_repo: MessagesRepository = Depends(get_messages_repository)
 ):
     return ChatHistoryService(chat_thread_repo, checkpoint_service, messages_repo)
+
+async def get_message_management_service(
+    messages_repo: MessagesRepository = Depends(get_messages_repository),
+    chat_thread_repo: ChatThreadRepository = Depends(get_chat_thread_repository)
+):
+    return MessageManagementService(messages_repo, chat_thread_repo)
 

@@ -14,5 +14,5 @@ export { UserMenu } from './UserMenu';
 export { default as StreamingGraphComponent } from './StreamingGraphComponent';
 export { default as Sidebar } from './Sidebar';
 // export { default as ChatThreadSelector } from './ChatThreadSelector'; // Commented for future use
-export { default as EnhancedInput } from './EnhancedInput';
+export { default as InputForm } from './InputForm';
 export { default as DeleteThreadModal } from './DeleteThreadModal';

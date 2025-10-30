@@ -129,13 +129,30 @@ export class GraphService {
     // Create a new EventSource connection to the streaming endpoint
     const eventSource = new EventSource(`${BASE_URL}${API_ENDPOINTS.STREAMING_GRAPH_STREAM(thread_id)}`);
     
+    // Enhanced error handling and recovery
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 3;
+    let lastHeartbeat = Date.now();
+    const heartbeatTimeout = 30000; // 30 seconds
+    
+    // Heartbeat monitoring
+    const heartbeatInterval = setInterval(() => {
+      if (Date.now() - lastHeartbeat > heartbeatTimeout) {
+        console.warn('⚠️ Stream heartbeat timeout, connection may be stale');
+        clearInterval(heartbeatInterval);
+        eventSource.close();
+        onErrorCallback(new Error('Stream connection timeout'));
+      }
+    }, 5000);
+    
     // Handle token events (content streaming)
     eventSource.addEventListener('token', (event) => {
       try {
+        lastHeartbeat = Date.now(); // Update heartbeat
         const data = JSON.parse(event.data);
         onMessageCallback({ content: data.content, node: data.node, type: data.type });
       } catch (error) {
-        console.error("Error parsing token event:", error, "Raw data:", event.data);
+        console.error("❌ Error parsing token event:", error, "Raw data:", event.data);
         onErrorCallback(error as Error);
       }
     });
@@ -143,6 +160,7 @@ export class GraphService {
     // Handle status events (user_feedback, finished)
     eventSource.addEventListener('status', (event) => {
       try {
+        lastHeartbeat = Date.now(); // Update heartbeat
         const data = JSON.parse(event.data);
         // Pass through response_type if it exists in the status event
         onMessageCallback({ 
@@ -156,9 +174,9 @@ export class GraphService {
           window._hasReceivedStatusEvent = {};
         }
         window._hasReceivedStatusEvent[eventSource.url] = true;
-        console.log("Received status event, marking connection for normal closure");
+        console.log("✅ Received status event, marking connection for normal closure");
       } catch (error) {
-        console.error("Error parsing status event:", error, "Raw data:", event.data);
+        console.error("❌ Error parsing status event:", error, "Raw data:", event.data);
         onErrorCallback(error as Error);
       }
     });
@@ -245,36 +263,104 @@ export class GraphService {
       }
     });
     
-    // Handle errors
+    // Handle errors with enhanced recovery
     eventSource.onerror = (error) => {
-      console.log("SSE connection state change - readyState:", eventSource.readyState);
+      console.log("🔄 SSE connection state change - readyState:", eventSource.readyState);
+      clearInterval(heartbeatInterval); // Clear heartbeat monitoring
       
       // Check if we've received a status event indicating completion
       const hasReceivedStatusEvent = window._hasReceivedStatusEvent && window._hasReceivedStatusEvent[eventSource.url];
       
       if (hasReceivedStatusEvent) {
-        console.log("Stream completed normally after receiving status event");
+        console.log("✅ Stream completed normally after receiving status event");
         eventSource.close();
         onCompleteCallback();
         return;
       }
       
+      // Handle reconnection attempts for transient errors
+      if (eventSource.readyState === EventSource.CONNECTING && reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++;
+        console.log(`🔄 Reconnection attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
+        
+        // Wait before next attempt with exponential backoff
+        setTimeout(() => {
+          if (eventSource.readyState === EventSource.CLOSED) {
+            console.log('🔄 Attempting to recover stream connection...');
+            // Note: EventSource handles reconnection automatically, 
+            // but we can implement custom recovery logic here if needed
+          }
+        }, Math.pow(2, reconnectAttempts) * 1000);
+        return;
+      }
+      
       // Only call the error callback if it's a real error, not a normal close
       if (eventSource.readyState !== EventSource.CLOSED && eventSource.readyState !== EventSource.CONNECTING) {
-        console.error("SSE connection error:", error);
+        console.error("❌ SSE connection error:", error);
         eventSource.close();
-        // Pass a proper error object with a message to avoid 'undefined' errors
-        onErrorCallback(new Error("Connection error or server disconnected"));
+        
+        // Enhanced error messaging
+        const errorMessage = reconnectAttempts >= maxReconnectAttempts 
+          ? `Connection failed after ${maxReconnectAttempts} retry attempts`
+          : "Connection error or server disconnected";
+        
+        onErrorCallback(new Error(errorMessage));
       } else {
         // If it's a normal close or reconnecting, call the complete callback
-        console.log("Stream completed normally");
+        console.log("✅ Stream completed normally");
         onCompleteCallback();
       }
     };
     
-    // Return the eventSource so it can be closed externally if needed
+    // Enhanced cleanup function
+    const cleanup = () => {
+      clearInterval(heartbeatInterval);
+      if (eventSource.readyState !== EventSource.CLOSED) {
+        eventSource.close();
+      }
+    };
+    
+    // Return just the eventSource for backward compatibility
     return eventSource;
   }
+
+  /**
+   * Recover messages from backend when streaming fails
+   * This helps ensure message consistency between frontend and backend
+   */
+  // static async recoverMessages(threadId: string): Promise<any[]> {
+  //   try {
+  //     console.log('🔄 Attempting to recover messages from backend...');
+      
+  //     // Import ChatHistoryService dynamically to avoid circular dependencies
+  //     const { ChatHistoryService } = await import('./chatHistoryService');
+  //     const messagesStatus = await ChatHistoryService.getMessagesStatus(threadId);
+      
+  //     console.log(`✅ Recovered ${messagesStatus.message_count} messages from backend`);
+  //     return messagesStatus.messages;
+  //   } catch (error) {
+  //     console.error('❌ Failed to recover messages from backend:', error);
+  //     throw error;
+  //   }
+  // }
+
+  // /**
+  //  * Sync message status with backend
+  //  * This ensures frontend state matches backend state
+  //  */
+  // static async syncMessageStatus(threadId: string, messageId: number, status: any): Promise<void> {
+  //   try {
+  //     const { ChatHistoryService } = await import('./chatHistoryService');
+  //     await ChatHistoryService.updateMessageFlags(threadId, {
+  //       message_id: messageId,
+  //       ...status
+  //     });
+  //     console.log(`✅ Synced message ${messageId} status with backend`);
+  //   } catch (error) {
+  //     console.error(`❌ Failed to sync message ${messageId} status:`, error);
+  //     throw error;
+  //   }
+  // }
      
 }
 

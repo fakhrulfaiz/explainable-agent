@@ -91,7 +91,7 @@ export const markdownComponents: Components = {
     </tbody>
   ),
   tr: ({children}) => (
-    <tr className="hover:bg-gray-50 dark:hover:bg-neutral-800">
+    <tr className="hover:bg-gray-50 dark:hover:bg-neutral-700">
       {children}
     </tr>
   ),

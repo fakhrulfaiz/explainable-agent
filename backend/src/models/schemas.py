@@ -114,6 +114,9 @@ class GraphResponse(BaseModel):
     overall_confidence: Optional[float] = Field(None, description="Overall confidence score if completed")
     response_type: Optional[str] = Field(None, description="Type of response: 'answer' for clarifications, 'replan' for new plans, 'cancel' for cancellations")
     visualizations: Optional[List[Dict[str, Any]]] = Field(None, description="Visualizations if completed")
+    assistant_message_id: Optional[int] = Field(None, description="Backend-generated message ID for assistant messages")
+    explorer_message_id: Optional[int] = Field(None, description="Backend-generated message ID for explorer messages")
+    visualization_message_id: Optional[int] = Field(None, description="Backend-generated message ID for visualization messages")
 
 class GraphStatusResponse(BaseModel):
 

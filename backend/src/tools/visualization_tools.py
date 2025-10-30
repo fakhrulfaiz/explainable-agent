@@ -97,7 +97,7 @@ class SmartTransformForVizTool(BaseTool):
         self,
         raw_data: List[Tuple] = None,
         columns: List[str] = None,
-        context: str = "data_analysis",
+        reasoning: str = Field(..., description="Reasoning about why the tool was selected"),
         viz_type: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None
     ) -> str:
@@ -106,7 +106,7 @@ class SmartTransformForVizTool(BaseTool):
         Args:
             raw_data: List of data tuples
             columns: List of column names
-            context: Context string for visualization
+            reasoning: Reasoning about why the tool was selected
             viz_type: Type of visualization (bar, line, pie)
             config: Optional configuration overrides for the visualization
         """
@@ -153,7 +153,7 @@ class SmartTransformForVizTool(BaseTool):
             
             prompt = ChatPromptTemplate.from_messages([
                 ("system", base_prompt),
-                ("user", """Context: {context}
+                ("user", """Reasoning: {reasoning}
                 
 Columns: {columns}
 
@@ -172,7 +172,7 @@ Transform this data into the most appropriate visualization format.""")
                 prompt.format_messages(
                     viz_type=viz_type,
                     viz_formats=viz_formats,
-                    context=context,
+                    reasoning=reasoning,
                     columns=columns,
                     sample_data=json.dumps(data_dicts[:5], indent=2),
                     total_rows=len(data_dicts),
@@ -235,7 +235,7 @@ Transform this data into the most appropriate visualization format.""")
                 "source": "smart_transform_for_viz",
                 "total_rows": len(raw_data),
                 "columns": columns,
-                "context": context
+                "reasoning": reasoning
             }
             
             return json.dumps(viz_config, indent=2)
@@ -247,9 +247,9 @@ Transform this data into the most appropriate visualization format.""")
         self,
         raw_data: List[Tuple] = None,
         columns: List[str] = None,
-        context: str = "data_analysis",
+        reasoning: str = Field(..., description="Reasoning about why the tool was selected"),
         viz_type: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None
     ) -> str:
         """Async version of the tool."""
-        return self._run(raw_data, columns, context, viz_type, config)
+        return self._run(raw_data, columns, reasoning, viz_type, config)
