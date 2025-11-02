@@ -22,7 +22,7 @@ const Message: React.FC<MessageComponentProps> = ({
     }
   };
  
-  if (message.messageType === 'explorer' || message.messageType === 'visualization') {
+  if (message.messageType === 'explorer' || message.messageType === 'visualization' || message.messageType === 'tool_call') {
     return (
       <div className="w-full mb-4">
         <MessageRenderer message={message} onAction={handleAction} />

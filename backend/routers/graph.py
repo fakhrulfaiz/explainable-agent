@@ -493,3 +493,307 @@ def restore_agent_state(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error restoring agent state: {str(e)}")
 
+
+# Streaming endpoints for real-time updates
+def yield_sse_event(event_type: str, data: dict) -> str:
+    """Helper function to create properly formatted SSE events"""
+    event_data = {
+        "type": event_type,
+        "data": data
+    }
+    # Ensure proper JSON formatting with no trailing spaces
+    json_str = json.dumps(event_data, ensure_ascii=False, separators=(',', ':'))
+    return f"data: {json_str}\n\n"
+
+
+@router.post("/start/stream")
+async def start_graph_stream(
+    request: StartRequest,
+    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
+):
+    """
+    Start graph execution with real-time streaming of internal AI messages and progress.
+    Returns Server-Sent Events (SSE) stream.
+    """
+    async def event_generator():
+        thread_id = None
+        try:
+            # Use provided thread_id or generate new one
+            thread_id = request.thread_id or str(uuid4())
+            config = {"configurable": {"thread_id": thread_id}}
+            
+            initial_state = ExplainableAgentState(
+                messages=[HumanMessage(content=request.human_request)],
+                query=request.human_request,
+                plan="",
+                steps=[],
+                step_counter=0,
+                status="approved",
+                assistant_response="",
+                use_planning=request.use_planning,
+                use_explainer=request.use_explainer,
+                agent_type="data_exploration_agent",
+                routing_reason=""
+            )
+            
+            # Send initial status
+            yield yield_sse_event("status", {
+                "thread_id": thread_id,
+                "status": "starting",
+                "message": "Initializing graph execution..."
+            })
+            
+            await asyncio.sleep(0.1)  # Small delay for client connection
+            
+            # Convert sync stream to async
+            def sync_stream():
+                return agent.graph.stream(initial_state, config, stream_mode="values")
+            
+            # Stream events as they happen
+            for event in sync_stream():
+                # Send internal AI messages/reasoning
+                if "messages" in event and event["messages"]:
+                    latest_message = event["messages"][-1]
+                    if latest_message and hasattr(latest_message, 'content') and latest_message.content:
+                        if type(latest_message).__name__ == 'AIMessage':
+                            # Check if it's a reasoning message (not a tool call response)
+                            if not hasattr(latest_message, 'tool_calls') or not latest_message.tool_calls:
+                                # Truncate very long content to prevent JSON parsing issues
+                                content = latest_message.content
+                                if len(content) > 10000:  # Limit to 10KB
+                                    content = content[:10000] + "... [truncated]"
+                                
+                                yield yield_sse_event("ai_thinking", {
+                                    "content": content,
+                                    "temporary": True,
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                
+                # Send plan updates
+                if "plan" in event and event["plan"]:
+                    yield yield_sse_event("plan_update", {
+                        "plan": event["plan"],
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
+                # Send step progress updates
+                if "steps" in event and event["steps"]:
+                    step_count = len(event["steps"])
+                    latest_step = event["steps"][-1] if event["steps"] else None
+                    yield yield_sse_event("step_progress", {
+                        "completed_steps": step_count,
+                        "latest_step": latest_step,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
+                # Send assistant response updates
+                if "assistant_response" in event and event["assistant_response"]:
+                    yield yield_sse_event("assistant_response", {
+                        "response": event["assistant_response"],
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
+                await asyncio.sleep(0.05)  # Small delay between events
+            
+            # Get final state and determine completion status
+            final_state = agent.graph.get_state(config)
+            
+            if final_state.next and "human_feedback" in final_state.next:
+                # Waiting for user feedback
+                current_values = final_state.values
+                assistant_response = current_values.get("assistant_response") or current_values.get("plan", "Plan generated - awaiting approval")
+                response_type = current_values.get("response_type")  # Get response_type from state
+                
+                yield yield_sse_event("waiting_feedback", {
+                    "status": "user_feedback",
+                    "thread_id": thread_id,
+                    "plan": current_values.get("plan", ""),
+                    "assistant_response": assistant_response,
+                    "response_type": response_type,  # Include response_type
+                    "timestamp": datetime.now().isoformat()
+                })
+            else:
+                # Execution completed
+                final_values = final_state.values
+                messages = final_values.get("messages", [])
+                
+                # Get the last AI message as the final response
+                final_response = ""
+                for msg in reversed(messages):
+                    if (hasattr(msg, 'content') and msg.content and 
+                        type(msg).__name__ == 'AIMessage' and
+                        (not hasattr(msg, 'tool_calls') or not msg.tool_calls)):
+                        final_response = msg.content
+                        break
+                
+                yield yield_sse_event("completed", {
+                    "status": "finished",
+                    "thread_id": thread_id,
+                    "final_response": final_response,
+                    "steps": final_values.get("steps", []),
+                    "plan": final_values.get("plan", ""),
+                    "timestamp": datetime.now().isoformat()
+                })
+                
+        except Exception as e:
+            error_message = str(e)
+            yield yield_sse_event("error", {
+                "error": error_message,
+                "thread_id": thread_id,
+                "timestamp": datetime.now().isoformat()
+            })
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )
+
+
+@router.post("/resume/stream")
+async def resume_graph_stream(
+    request: ResumeRequest,
+    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
+):
+    """
+    Resume graph execution with real-time streaming of internal AI messages and progress.
+    Returns Server-Sent Events (SSE) stream.
+    """
+    async def event_generator():
+        logger = logging.getLogger(__name__)
+        try:
+            config = {"configurable": {"thread_id": request.thread_id}}
+            
+            logger.info(f"Resuming graph stream for thread_id: {request.thread_id}, action: {request.review_action}")
+            
+            # Get current state to validate
+            current_state = agent.graph.get_state(config)
+            if not current_state:
+                yield yield_sse_event("error", {
+                    "error": f"No graph execution found for thread_id: {request.thread_id}",
+                    "thread_id": request.thread_id,
+                    "timestamp": datetime.now().isoformat()
+                })
+                return
+            
+            # Check if waiting for feedback
+            if not (current_state.next and "human_feedback" in current_state.next):
+                yield yield_sse_event("error", {
+                    "error": f"Graph execution for thread_id {request.thread_id} is not waiting for human feedback",
+                    "thread_id": request.thread_id,
+                    "current_next_nodes": list(current_state.next) if current_state.next else [],
+                    "timestamp": datetime.now().isoformat()
+                })
+                return
+            
+            # Send resume status
+            yield yield_sse_event("status", {
+                "thread_id": request.thread_id,
+                "status": "resuming",
+                "action": request.review_action,
+                "message": f"Resuming execution with action: {request.review_action}"
+            })
+            
+            # Update state with user decision
+            state_update = {"status": request.review_action}
+            if request.human_comment is not None:
+                state_update["human_comment"] = request.human_comment
+            
+            logger.info(f"State update for thread {request.thread_id}: {state_update}")
+            agent.graph.update_state(config, state_update)
+            
+            await asyncio.sleep(0.1)  # Small delay after state update
+            
+            # Convert sync stream to async for continuation
+            def sync_resume_stream():
+                return agent.graph.stream(None, config, stream_mode="values")
+            
+            # Stream continuation events with same logic as start
+            for event in sync_resume_stream():
+                # Send internal AI messages/reasoning
+                if "messages" in event and event["messages"]:
+                    latest_message = event["messages"][-1]
+                    if latest_message and hasattr(latest_message, 'content') and latest_message.content:
+                        if type(latest_message).__name__ == 'AIMessage':
+                            if not hasattr(latest_message, 'tool_calls') or not latest_message.tool_calls:
+                                yield yield_sse_event("ai_thinking", {
+                                    "content": latest_message.content,
+                                    "temporary": True,
+                                    "timestamp": datetime.now().isoformat()
+                                })
+                
+                # Send step progress
+                if "steps" in event and event["steps"]:
+                    step_count = len(event["steps"])
+                    latest_step = event["steps"][-1] if event["steps"] else None
+                    yield yield_sse_event("step_progress", {
+                        "completed_steps": step_count,
+                        "latest_step": latest_step,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
+                await asyncio.sleep(0.05)
+            
+            # Get final state
+            final_state = agent.graph.get_state(config)
+            
+            if final_state.next and "human_feedback" in final_state.next:
+                # Still waiting for more feedback
+                current_values = final_state.values
+                response_type = current_values.get("response_type")  # Get response_type from state
+                yield yield_sse_event("waiting_feedback", {
+                    "status": "user_feedback",
+                    "thread_id": request.thread_id,
+                    "plan": current_values.get("plan", ""),
+                    "assistant_response": current_values.get("assistant_response", ""),
+                    "response_type": response_type,  # Include response_type
+                    "timestamp": datetime.now().isoformat()
+                })
+            else:
+                # Execution completed
+                final_values = final_state.values
+                messages = final_values.get("messages", [])
+                
+                final_response = ""
+                for msg in reversed(messages):
+                    if (hasattr(msg, 'content') and msg.content and 
+                        type(msg).__name__ == 'AIMessage' and
+                        (not hasattr(msg, 'tool_calls') or not msg.tool_calls)):
+                        final_response = msg.content
+                        break
+                
+                yield yield_sse_event("completed", {
+                    "status": "finished",
+                    "thread_id": request.thread_id,
+                    "final_response": final_response,
+                    "steps": final_values.get("steps", []),
+                    "plan": final_values.get("plan", ""),
+                    "timestamp": datetime.now().isoformat()
+                })
+                
+        except Exception as e:
+            error_message = str(e)
+            logger.error(f"Error in resume stream for thread {request.thread_id}: {error_message}")
+            yield yield_sse_event("error", {
+                "error": error_message,
+                "thread_id": request.thread_id,
+                "timestamp": datetime.now().isoformat()
+            })
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+        }
+    )

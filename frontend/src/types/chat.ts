@@ -13,11 +13,18 @@ export interface Message {
   canRetry?: boolean;
   retryAction?: 'approve' | 'feedback' | 'cancel';
   threadId?: string;
-  messageType?: 'message' | 'explorer' | 'visualization';
+  messageType?: 'message' | 'explorer' | 'visualization' | 'tool_call';
   checkpointId?: string;
   metadata?: {
     explorerData?: any;
     visualizations?: any[];
+    toolCalls?: Array<{
+      id: string;
+      name: string;
+      input: any;
+      output?: any;
+      status: 'pending' | 'approved' | 'rejected';
+    }>;
     [key: string]: any;
   };
 }
@@ -58,6 +65,7 @@ export interface ChatComponentProps {
   onMessageUpdated?: (message: Message) => void;
   threadTitle?: string;
   onTitleChange?: (newTitle: string) => void;
+  sidebarExpanded?: boolean;
 }
 
 export interface MessageComponentProps {

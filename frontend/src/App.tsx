@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 // import { Header } from './components';
-import { ChatWithApproval, StreamingTutorial, Login, SignUp, ForgotPassword, UpdatePassword, AuthConfirm } from './pages';
+import { ChatWithApproval, Login, SignUp, ForgotPassword, UpdatePassword, AuthConfirm, Test } from './pages';
 import { AuthProvider } from './contexts/AuthContext';
 import { UIStateProvider, useUIState } from './contexts/UIStateContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -46,12 +46,12 @@ const AppContent: React.FC = () => {
               <ChatWithApproval />
             </ProtectedRoute>
           } />
-          
-          <Route path="/streaming" element={
+          <Route path="/test" element={
             <ProtectedRoute>
-              <StreamingTutorial />
+              <Test />
             </ProtectedRoute>
           } />
+          
         </Routes>
       </div>
     </div>

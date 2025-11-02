@@ -240,10 +240,11 @@ export class GraphService {
     // Handle tool call events
     eventSource.addEventListener('tool_call', (event) => {
       try {
-        console.log("🔧 FRONTEND: Received tool_call event:", event.data);
-        const data = JSON.parse(event.data);
-        console.log("🔧 FRONTEND: Parsed tool_call data:", data);
-        onMessageCallback({ status: 'tool_call', eventData: event.data });
+        lastHeartbeat = Date.now();
+        onMessageCallback({ 
+          status: 'tool_call', 
+          eventData: event.data
+        });
       } catch (error) {
         console.error("Error parsing tool_call event:", error, "Raw data:", event.data);
         onErrorCallback(error as Error);
@@ -253,10 +254,15 @@ export class GraphService {
     // Handle tool result events
     eventSource.addEventListener('tool_result', (event) => {
       try {
+        lastHeartbeat = Date.now();
         console.log("✅ FRONTEND: Received tool_result event:", event.data);
         const data = JSON.parse(event.data);
         console.log("✅ FRONTEND: Parsed tool_result data:", data);
-        onMessageCallback({ status: 'tool_result', eventData: event.data });
+        // Pass through as status event so it reaches onStatus callback
+        onMessageCallback({ 
+          status: 'tool_result', 
+          eventData: event.data  // Pass the raw JSON string so ChatComponent can parse it
+        });
       } catch (error) {
         console.error("Error parsing tool_result event:", error, "Raw data:", event.data);
         onErrorCallback(error as Error);

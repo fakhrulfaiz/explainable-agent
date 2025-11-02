@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChatComponent, ExplorerPanel, VisualizationPanel } from '../components';
 // import ChatThreadSelector from '../components/ChatThreadSelector'; // Commented for future use
-import Sidebar from '../components/Sidebar';
+import { EnhancedSidebar2 } from '../components';
 import { Message, HandlerResponse } from '../types/chat';
 import { GraphService } from '../api/services/graphService';
 import { ChatHistoryService } from '../api/services/chatHistoryService';
@@ -28,7 +28,7 @@ const ChatWithApproval: React.FC = () => {
   const [visualizationOpen, setVisualizationOpen] = useState<boolean>(false);
   const [visualizationCharts, setVisualizationCharts] = useState<any[] | null>(null);
   const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false); // Sidebar state - starts closed
+  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(true); // Track sidebar expansion for margin
   const [currentThreadTitle, setCurrentThreadTitle] = useState<string>(''); // Thread title state
 
   // Streaming connection reference
@@ -333,7 +333,7 @@ const ChatWithApproval: React.FC = () => {
             }
             
             if (onStatus) {
-              onStatus(data.status, data.eventData, data.response_type);  // Pass response_type
+              onStatus(data.status, data.eventData, data.response_type);  // Pass eventData and response_type
             }
           }
         },
@@ -788,7 +788,7 @@ const ChatWithApproval: React.FC = () => {
 
     setLoadingThread(true);
     try {
-      setSelectedChatThreadId(threadId)
+      setSelectedChatThreadId(threadId);
       currentThreadIdRef.current = threadId;
       
       if (threadId) {
@@ -807,8 +807,9 @@ const ChatWithApproval: React.FC = () => {
         await restoreDataIfNeeded(convertedMessages, threadId);
         setChatKey(prev => prev + 1);
       } else {
+        // Clear thread when null (e.g., after deletion)
         setRestoredMessages([]);
-        setCurrentThreadTitle(''); // Clear thread title for new thread
+        setCurrentThreadTitle('');
         setChatKey(prev => prev + 1);
         setThreadId(null);
         setExplorerData(null);
@@ -852,46 +853,20 @@ const ChatWithApproval: React.FC = () => {
   };
 
   return (
-    <div className="relative h-full">
-      {/* Sidebar */}
-      <Sidebar
+    <div className="h-full w-full overflow-hidden">
+      {/* Enhanced Sidebar - always visible, expands/collapses */}
+      <EnhancedSidebar2
         selectedThreadId={selectedChatThreadId || undefined}
         onThreadSelect={handleThreadSelect}
         onNewThread={handleNewThread}
-        isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        onExpandedChange={setSidebarExpanded}
       />
 
-      {/* Main Content - dynamic left padding based on sidebar (desktop only) */}
-      <div className={`h-full min-h-0 flex flex-col pl-0 ${sidebarOpen ? 'md:pl-80' : 'md:pl-[4.5rem]'}`} style={{ padding: '0 0.5rem' }}>
+  
+      <div className={`h-full min-h-0 flex flex-col transition-[margin-left] duration-300 ease-in-out overflow-hidden ml-0 ${sidebarExpanded ? 'md:ml-82' : 'md:ml-14'}`}>
         <div className="w-full h-full flex flex-col min-h-0">
         
-          {/* Thread Selector - Commented for future use */}
-          {/* <div className="mb-4 flex items-center justify-between">
-            <div className="flex-1">
-              <ChatThreadSelector
-                selectedThreadId={selectedChatThreadId || undefined}
-                onThreadSelect={handleThreadSelect}
-                onNewThread={handleNewThread}
-              />
-            </div>
-            <div className="ml-4 flex items-center gap-4 flex-shrink-0">
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={useStreaming}
-                  onChange={(e) => {
-                    setUseStreaming(e.target.checked);
-                  }}
-                />
-                Streaming {useStreaming ? '(on)' : '(off)'}
-              </label>
-              <div className="text-xs text-gray-500 w-86 text-right">
-                {selectedChatThreadId ? `Thread ID: ${selectedChatThreadId}` : ''}
-              </div>
-            </div>
-          </div> */}
-
+      
           {/* Chat Container */}
           <div className="flex-1 min-h-0">
             <div className="w-full h-full">
@@ -910,6 +885,7 @@ const ChatWithApproval: React.FC = () => {
                 onMessageUpdated={handleMessageUpdated}
                 threadTitle={currentThreadTitle}
                 onTitleChange={handleTitleChange}
+                sidebarExpanded={sidebarExpanded}
               />
             </div>
           </div>

@@ -5,6 +5,7 @@ import { Message } from '../types/chat';
 import { ExplorerRenderer } from './renderers/ExplorerRenderer';
 import { markdownComponents } from '../utils/markdownComponents';
 import VisualizationRenderer from './renderers/VisualizationRenderer';
+import { ToolCallRenderer } from './renderers/ToolCallRenderer';
 
 interface MessageRendererProps {
   message: Message;
@@ -29,6 +30,12 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
           <VisualizationRenderer 
             charts={message.metadata?.visualizations}
             onOpenVisualization={() => onAction?.('openVisualization', message.metadata?.visualizations)}
+          />
+        );
+      case 'tool_call':
+        return (
+          <ToolCallRenderer 
+            toolCalls={message.metadata?.toolCalls || []}
           />
         );
       case 'message':

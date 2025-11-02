@@ -63,7 +63,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   onMessageCreated,
   onMessageUpdated,
   threadTitle,
-  onTitleChange
+  onTitleChange,
+  sidebarExpanded = true
 }) => {
   // Use UI state context for loading and execution state
   const { state, setExecutionStatus, setLoading } = useUIState();
@@ -253,37 +254,74 @@ const handleToolEvents = useCallback((
 ) => {
   // Handle tool call start - show temporary indicator
   if (status === 'tool_call' && eventData) {
-    const toolData = JSON.parse(eventData);
-    setToolStepHistory(prev => {
-      const newStep = {
-        name: toolData.tool_name || 'Unknown Tool',
-        id: toolData.tool_id,
-        startTime: Date.now(),
-        status: 'calling' as const
-      };
-      return {
-        messageId: streamingMsgId,
-        steps: [
-          ...(prev?.messageId === streamingMsgId ? prev.steps : []),
-          newStep
-        ]
-      };
-    });
+    try {
+      const toolData = JSON.parse(eventData);
+      const toolId = toolData.tool_id;
+      const toolName = toolData.tool_name || 'Unknown Tool';
+      
+      // Only add to indicator if we have a real tool_id (not temp key)
+      if (toolId && !toolId.toString().startsWith('temp_')) {
+        setToolStepHistory(prev => {
+          if (!prev || prev.messageId !== streamingMsgId) {
+            // Create new history
+            return {
+              messageId: streamingMsgId,
+              steps: [{
+                name: toolName,
+                id: toolId,
+                startTime: Date.now(),
+                status: 'calling' as const
+              }]
+            };
+          }
+          
+          // Check if step already exists
+          const existingStep = prev.steps.find(s => s.id === toolId);
+          
+          if (existingStep) {
+            // Update existing step (for incremental updates)
+            const updatedSteps = prev.steps.map(step =>
+              step.id === toolId ? { ...step, name: toolName } : step
+            );
+            return { ...prev, steps: updatedSteps };
+          } else {
+            // Add new step
+            return {
+              ...prev,
+              steps: [...prev.steps, {
+                name: toolName,
+                id: toolId,
+                startTime: Date.now(),
+                status: 'calling' as const
+              }]
+            };
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error handling tool_call for indicator:', error);
+    }
   }
   
-  // Handle tool result - remove the temporary indicator
+  // Handle tool result - update the indicator
   if (status === 'tool_result' && eventData) {
-    const resultData = JSON.parse(eventData);
-    setToolStepHistory(prev => {
-      if (!prev || prev.messageId !== streamingMsgId) return prev;
+    try {
+      const resultData = JSON.parse(eventData);
+      const toolCallId = resultData.tool_call_id;
       
-      const updatedSteps = prev.steps.map(step => 
-        step.id === resultData.tool_call_id 
-          ? { ...step, status: 'completed' as const, endTime: Date.now() }
-          : step
-      );
-      return { ...prev, steps: updatedSteps };
-    });
+      setToolStepHistory(prev => {
+        if (!prev || prev.messageId !== streamingMsgId) return prev;
+        
+        const updatedSteps = prev.steps.map(step => 
+          step.id === toolCallId 
+            ? { ...step, status: 'completed' as const, endTime: Date.now() }
+            : step
+        );
+        return { ...prev, steps: updatedSteps };
+      });
+    } catch (error) {
+      console.error('Error handling tool_result for indicator:', error);
+    }
   }
 }, []);
 
@@ -474,7 +512,126 @@ const updateMessageCallback = useCallback(
           await response.streamingHandler(streamingMsgId, updateMessageCallback, (status, eventData, responseType) => {
             if (!status) return;            
             
-            // Handle tool events
+            // Handle tool_call event - parse complete args and update message
+            if (status === 'tool_call' && eventData) {
+              try {
+                const toolData = JSON.parse(eventData);
+                const toolId = toolData.tool_id || toolData.tool_call_id || `tool_${Date.now()}`;
+                const toolName = toolData.tool_name || 'Unknown Tool';
+                const argsString = toolData.args || '';
+                
+                // Parse complete args directly
+                let parsedArgs: any = {};
+                if (argsString) {
+                  try {
+                    parsedArgs = JSON.parse(argsString);
+                  } catch (error) {
+                    // If parsing fails, keep empty object
+                    console.warn('Failed to parse tool args:', error);
+                  }
+                }
+                
+                // Update existing message or create new one
+                setMessages(prev => {
+                  const existingMessage = prev.find(m => 
+                    m.messageType === 'tool_call' && 
+                    m.metadata?.toolCalls?.some((tc: any) => tc.id === toolId)
+                  );
+                  
+                  if (existingMessage) {
+                    // Update existing
+                    return prev.map(m => {
+                      if (m.id === existingMessage.id && m.metadata?.toolCalls) {
+                        return {
+                          ...m,
+                          metadata: {
+                            ...m.metadata,
+                            toolCalls: m.metadata.toolCalls.map((tc: any) =>
+                              tc.id === toolId ? { ...tc, input: parsedArgs } : tc
+                            )
+                          }
+                        };
+                      }
+                      return m;
+                    });
+                  } else {
+                    // Create new
+                    const toolCallMessageId = Date.now() + Math.random();
+                    const toolCallMessage: MessageType = {
+                      id: toolCallMessageId,
+                      role: 'assistant',
+                      content: '',
+                      timestamp: new Date(),
+                      messageType: 'tool_call',
+                      threadId: contextThreadId || currentThreadId || undefined,
+                      metadata: {
+                        toolCalls: [{
+                          id: toolId,
+                          name: toolName,
+                          input: parsedArgs,
+                          status: 'pending' as const
+                        }]
+                      }
+                    };
+                    if (typeof onMessageCreated === 'function') {
+                      onMessageCreated(toolCallMessage);
+                    }
+                    return [...prev, toolCallMessage];
+                  }
+                });
+                
+                // Also update ephemeral tool indicator
+                handleToolEvents(status, eventData, streamingMsgId);
+              } catch (error) {
+                console.error('Error handling tool_call event:', error);
+              }
+              return;
+            }
+            
+            // Handle tool_result event - update with output and full input from backend
+            if (status === 'tool_result' && eventData) {
+              try {
+                const resultData = JSON.parse(eventData);
+                const toolCallId = resultData.tool_call_id;
+                let toolOutput = resultData.output || resultData.content || '';
+                const toolInput = resultData.input || {}; // Full input from backend
+                
+                // Try to parse output as JSON, if it fails use original
+                if (typeof toolOutput === 'string' && toolOutput.trim()) {
+                  try {
+                    const parsedOutput = JSON.parse(toolOutput);
+                    toolOutput = parsedOutput;
+                  } catch (error) {
+                    // Not valid JSON, use original string output
+                  }
+                }
+                
+                // Update message with output and full input
+                setMessages(prev => prev.map(m => {
+                  if (m.messageType === 'tool_call' && m.metadata?.toolCalls) {
+                    const updatedToolCalls = m.metadata.toolCalls.map((tc: any) => 
+                      tc.id === toolCallId
+                        ? { ...tc, input: toolInput, output: toolOutput, status: 'approved' as const }
+                        : tc
+                    );
+                    if (updatedToolCalls.some((tc: any) => tc.id === toolCallId)) {
+                      return {
+                        ...m,
+                        metadata: { ...m.metadata, toolCalls: updatedToolCalls }
+                      };
+                    }
+                  }
+                  return m;
+                }));
+                
+                handleToolEvents(status, eventData, streamingMsgId);
+              } catch (error) {
+                console.error('Error handling tool_result event:', error);
+              }
+              return;
+            }
+            
+            // Handle tool events for ephemeral indicators
             handleToolEvents(status, eventData, streamingMsgId);
             
             // Handle error status from agent and append error message
@@ -955,9 +1112,9 @@ const updateMessageCallback = useCallback(
       {threadTitle && (
         <>
            {/* Mobile: Full-width background with gradient bottom */}
-           <div className="md:hidden fixed top-0 left-0 right-0 z-30">
+           <div className={`md:hidden fixed top-0 left-0 right-0 z-30 transition-[left] duration-300 ease-in-out`}>
              {/* Main background */}
-             <div className="bg-white dark:bg-neutral-800 pl-16 pr-4 py-3">
+             <div className="bg-white dark:bg-neutral-800 py-3 pr-4 pl-14">
                <ThreadTitle 
                  title={threadTitle}
                  threadId={currentThreadId || undefined}
@@ -968,12 +1125,18 @@ const updateMessageCallback = useCallback(
              <div className="h-3 bg-gradient-to-b from-white dark:from-neutral-800 via-white/20 dark:via-neutral-800/20 to-transparent"></div>
            </div>
 
-          <div className="hidden md:block fixed top-4 left-20 z-30">
-            <ThreadTitle 
-              title={threadTitle}
-              threadId={currentThreadId || undefined}
-              onTitleChange={onTitleChange}
-            />
+          {/* Desktop: Background with gradient bottom */}
+          <div className={`hidden md:block fixed top-0 left-0 right-0 z-30 transition-[left] duration-300 ease-in-out`}>
+            {/* Main background */}
+            <div className={`bg-white dark:bg-neutral-800 py-3 pr-4 ${sidebarExpanded ? 'pl-82' : 'pl-14'} transition-[padding-left] duration-300 ease-in-out`}>
+              <ThreadTitle 
+                title={threadTitle}
+                threadId={currentThreadId || undefined}
+                onTitleChange={onTitleChange}
+              />
+            </div>
+            {/* Very sharp gradient fade at bottom */}
+            <div className="h-3 bg-gradient-to-b from-white dark:from-neutral-800 via-white/20 dark:via-neutral-800/20 to-transparent"></div>
           </div>
         </>
       )}
@@ -1031,14 +1194,14 @@ const updateMessageCallback = useCallback(
         </div>
       </div>
 
-      {/* Fixed Input Area - viewport-centered positioning */}
-      <div className={`fixed left-0 right-0 z-10 transition-all duration-500 ease-in-out ${
+      {/* Fixed Input Area - viewport-centered positioning, respects sidebar */}
+      <div className={`fixed left-0 ${sidebarExpanded ? 'md:left-82' : 'md:left-14'} right-0 z-10 transition-all duration-300 ease-in-out ${
         messages.length === 0 
           ? 'bottom-0 pb-3 md:top-1/2 md:transform md:-translate-y-1/2 md:flex md:items-center md:justify-center' 
-          : 'bottom-0'
+          : 'bottom-0 pb-3 md:flex md:items-center'
       }`}>
         {/* Input - always show, but change placeholder based on context */}
-        <div className={`${messages.length === 0 ? 'max-w-4xl px-6' : 'max-w-3xl px-4'} w-full mx-auto`}>
+        <div className={`${messages.length === 0 ? 'max-w-4xl px-6' : 'max-w-3xl px-4'} min-w-[320px] w-full mx-auto`}>
           <InputForm
             value={inputValue}
             onChange={setInputValue}

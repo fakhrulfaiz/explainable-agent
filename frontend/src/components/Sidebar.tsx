@@ -5,7 +5,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { Separator } from './ui/separator';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import DeleteThreadModal from './DeleteThreadModal';
+import DeleteThreadDialog from './DeleteThreadDialog';
 import DarkModeToggle from './DarkModeToggle';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -31,7 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; threadId: string; threadTitle: string }>({
+  const [deleteDialog, setDeleteDialog] = useState<{ isOpen: boolean; threadId: string; threadTitle: string }>({
     isOpen: false,
     threadId: '',
     threadTitle: ''
@@ -76,7 +76,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const handleDeleteThread = (threadId: string, threadTitle: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setDeleteModal({
+    setDeleteDialog({
       isOpen: true,
       threadId,
       threadTitle: threadTitle || 'Untitled Chat'
@@ -87,14 +87,14 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const handleConfirmDelete = async () => {
     try {
-      await ChatHistoryService.deleteThread(deleteModal.threadId);
-      setThreads(prev => prev.filter(t => t.thread_id !== deleteModal.threadId));
+      await ChatHistoryService.deleteThread(deleteDialog.threadId);
+      setThreads(prev => prev.filter(t => t.thread_id !== deleteDialog.threadId));
       
-      if (selectedThreadId === deleteModal.threadId) {
+      if (selectedThreadId === deleteDialog.threadId) {
         onThreadSelect(null);
       }
       
-      setDeleteModal({ isOpen: false, threadId: '', threadTitle: '' });
+      setDeleteDialog({ isOpen: false, threadId: '', threadTitle: '' });
     } catch (err) {
       console.error('Error deleting thread:', err);
       alert('Failed to delete thread');
@@ -102,7 +102,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const handleCancelDelete = () => {
-    setDeleteModal({ isOpen: false, threadId: '', threadTitle: '' });
+    setDeleteDialog({ isOpen: false, threadId: '', threadTitle: '' });
   };
 
   const handleEditTitle = (threadId: string, currentTitle: string, e: React.MouseEvent) => {
@@ -451,10 +451,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
 
-      {/* Delete Thread Modal */}
-      <DeleteThreadModal
-        isOpen={deleteModal.isOpen}
-        threadTitle={deleteModal.threadTitle}
+      {/* Delete Thread Dialog */}
+      <DeleteThreadDialog
+        isOpen={deleteDialog.isOpen}
+        threadTitle={deleteDialog.threadTitle}
         onClose={handleCancelDelete}
         onConfirm={handleConfirmDelete}
       />

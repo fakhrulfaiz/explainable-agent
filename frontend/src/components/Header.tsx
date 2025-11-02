@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageCircle, Code, Bot, Menu, X } from 'lucide-react';
+import { MessageCircle, Bot, Menu, X } from 'lucide-react';
 import LLMSelector from './LLMSelector';
 import { UserMenu } from './UserMenu';
 
@@ -32,7 +32,6 @@ const Header: React.FC = () => {
 
   const navItems = [
     { path: '/', label: 'Chat with Approval', icon: MessageCircle },
-    { path: '/streaming', label: 'Streaming Tutorial', icon: Code },
   ];
 
   return (
