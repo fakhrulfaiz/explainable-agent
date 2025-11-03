@@ -1128,7 +1128,7 @@ const updateMessageCallback = useCallback(
           {/* Desktop: Background with gradient bottom */}
           <div className={`hidden md:block fixed top-0 left-0 right-0 z-30 transition-[left] duration-300 ease-in-out`}>
             {/* Main background */}
-            <div className={`bg-white dark:bg-neutral-800 py-3 pr-4 ${sidebarExpanded ? 'pl-82' : 'pl-14'} transition-[padding-left] duration-300 ease-in-out`}>
+            <div className={`bg-white dark:bg-neutral-800 py-3 pr-4 ${sidebarExpanded ? 'pl-84' : 'pl-16'} transition-[padding-left] duration-300 ease-in-out`}>
               <ThreadTitle 
                 title={threadTitle}
                 threadId={currentThreadId || undefined}
