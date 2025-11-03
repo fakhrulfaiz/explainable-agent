@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ToolCallMessage } from '../components/messages/ToolCallMessage';
 import InputForm from '../components/InputForm';
 import TestSidebar from '../components/TestSidebar';
+import LoadingIndicator from '@/components/LoadingIndicator';
 
 // Mock data for ToolCallRenderer testing
 const mockToolCalls = [
@@ -124,7 +125,8 @@ const Test: React.FC = () => {
               onFilesChange={setAttachedFiles}
               attachedFiles={attachedFiles}
             />
-          </div>
+            </div>
+          <LoadingIndicator />
           <div className="mt-4 text-sm text-gray-600 dark:text-gray-400">
             <p>Planning: {usePlanning ? 'Enabled' : 'Disabled'}</p>
             <p>Explainer: {useExplainer ? 'Enabled' : 'Disabled'}</p>

@@ -1194,14 +1194,19 @@ const updateMessageCallback = useCallback(
         </div>
       </div>
 
-      {/* Fixed Input Area - viewport-centered positioning, respects sidebar */}
+     
       <div className={`fixed left-0 ${sidebarExpanded ? 'md:left-82' : 'md:left-14'} right-0 z-10 transition-all duration-300 ease-in-out ${
         messages.length === 0 
           ? 'bottom-0 pb-3 md:top-1/2 md:transform md:-translate-y-1/2 md:flex md:items-center md:justify-center' 
           : 'bottom-0 pb-3 md:flex md:items-center'
       }`}>
-        {/* Input - always show, but change placeholder based on context */}
+       
         <div className={`${messages.length === 0 ? 'max-w-4xl px-6' : 'max-w-3xl px-4'} min-w-[320px] w-full mx-auto`}>
+          {messages.length === 0 && (
+            <div className="hidden md:block mb-5 text-center text-gray-500 dark:text-gray-400">
+              <span className="text-3xl">Hi User! Start a conversation</span>
+            </div>
+          )}
           <InputForm
             value={inputValue}
             onChange={setInputValue}
