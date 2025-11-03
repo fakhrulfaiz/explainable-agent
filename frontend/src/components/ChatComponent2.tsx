@@ -4,7 +4,7 @@ import { Message as MessageType, ChatComponentProps, HandlerResponse } from '../
 import { useUIState } from '../contexts/UIStateContext';
 import Message from './Message';
 import FeedbackForm from './FeedbackForm';
-import LoadingIndicator from './LoadingIndicator';
+import GeneratingIndicator from './GeneratingIndicator';
 import InputForm from './InputForm';
 import '../styles/scrollbar.css';
 
@@ -1140,7 +1140,7 @@ const updateMessageCallback = useCallback(
 
         {/* Loading indicator */}
         { isLoading && (
-          <LoadingIndicator 
+          <GeneratingIndicator 
             activeTools={toolStepHistory?.steps.filter(s => s.status === 'calling').map(s => s.name)} 
           />
         )}

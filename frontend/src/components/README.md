@@ -27,7 +27,7 @@ Individual message display component that handles:
 
 A form component for collecting user feedback on assistant responses.
 
-### LoadingIndicator
+### GeneratingIndicator
 
 A simple animated loading indicator for when the assistant is typing.
 

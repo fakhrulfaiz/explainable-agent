@@ -3,7 +3,7 @@ import { ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Message as MessageType, ChatComponentProps, HandlerResponse } from '../types/chat';
 import { useUIState } from '../contexts/UIStateContext';
 import Message from './Message';
-import LoadingIndicator from './LoadingIndicator';
+import GeneratingIndicator from './GeneratingIndicator';
 import InputForm from './InputForm';
 import ThreadTitle from './ThreadTitle';
 import '../styles/scrollbar.css';
@@ -1186,7 +1186,7 @@ const updateMessageCallback = useCallback(
 
         {/* Loading indicator */}
         {!useStreaming && isLoading && (
-          <LoadingIndicator 
+          <GeneratingIndicator 
             activeTools={toolStepHistory?.steps.filter(s => s.status === 'calling').map(s => s.name)} 
           />
         )}
