@@ -36,11 +36,11 @@ interface ToolCall {
   output?: ToolCallOutput | string | null;
 }
 
-interface ToolCallRendererProps {
+interface ToolCallMessageProps {
   toolCalls: ToolCall[];
 }
 
-export const ToolCallRenderer: React.FC<ToolCallRendererProps> = ({ toolCalls }) => {
+export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls }) => {
   const getStatusColor = (status: ToolCallStatus): string => {
     switch (status) {
       case 'approved':
@@ -96,7 +96,6 @@ export const ToolCallRenderer: React.FC<ToolCallRendererProps> = ({ toolCalls })
             
             <AccordionContent className="pb-2">
               <div className="space-y-3 pt-1.5">
-                {/* Input Section */}
                 <div>
                   <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-1.5">
                     Input:
@@ -108,7 +107,6 @@ export const ToolCallRenderer: React.FC<ToolCallRendererProps> = ({ toolCalls })
                   </div>
                 </div>
 
-                {/* Output Section */}
                 {call.output && (
                   <div>
                     <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-1.5">
@@ -134,3 +132,5 @@ export const ToolCallRenderer: React.FC<ToolCallRendererProps> = ({ toolCalls })
     </Accordion>
   );
 };
+
+

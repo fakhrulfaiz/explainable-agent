@@ -1,11 +1,11 @@
 import React from 'react';
 
-interface VisualizationRendererProps {
+interface VisualizationMessageProps {
   charts?: any[];
   onOpenVisualization?: () => void;
 }
 
-export const VisualizationRenderer: React.FC<VisualizationRendererProps> = ({  
+export const VisualizationMessage: React.FC<VisualizationMessageProps> = ({  
   charts, 
   onOpenVisualization,  
 }) => {
@@ -40,6 +40,6 @@ export const VisualizationRenderer: React.FC<VisualizationRendererProps> = ({
   );
 };
 
-export default VisualizationRenderer;
+export default VisualizationMessage;
 
 

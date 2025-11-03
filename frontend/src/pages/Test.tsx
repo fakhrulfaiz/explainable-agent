@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ToolCallRenderer } from '../components/renderers/ToolCallRenderer';
+import { ToolCallMessage } from '../components/messages/ToolCallMessage';
 import InputForm from '../components/InputForm';
 import TestSidebar from '../components/TestSidebar';
 
@@ -93,13 +93,13 @@ const Test: React.FC = () => {
           </p>
         </div>
 
-        {/* ToolCallRenderer Test Section */}
+        {/* ToolCallMessage Test Section */}
         <div className="bg-white dark:bg-neutral-700 rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">
-            ToolCallRenderer Component
+            ToolCallMessage Component
           </h2>
           <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-            <ToolCallRenderer toolCalls={mockToolCalls} />
+            <ToolCallMessage toolCalls={mockToolCalls} />
           </div>
         </div>
 

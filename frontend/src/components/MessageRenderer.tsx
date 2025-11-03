@@ -2,10 +2,10 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message } from '../types/chat';
-import { ExplorerRenderer } from './renderers/ExplorerRenderer';
+import { ExplorerMessage } from './messages/ExplorerMessage';
 import { markdownComponents } from '../utils/markdownComponents';
-import VisualizationRenderer from './renderers/VisualizationRenderer';
-import { ToolCallRenderer } from './renderers/ToolCallRenderer';
+import VisualizationMessage from './messages/VisualizationMessage';
+import { ToolCallMessage } from './messages/ToolCallMessage';
 
 interface MessageRendererProps {
   message: Message;
@@ -17,7 +17,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
     switch (message.messageType) {
       case 'explorer':
         return (
-          <ExplorerRenderer 
+          <ExplorerMessage 
             data={message.metadata?.explorerData}
             onOpenExplorer={() => onAction?.('openExplorer', message.metadata?.explorerData)}
             content={message.content}
@@ -27,14 +27,14 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
       
       case 'visualization':
         return (
-          <VisualizationRenderer 
+          <VisualizationMessage 
             charts={message.metadata?.visualizations}
             onOpenVisualization={() => onAction?.('openVisualization', message.metadata?.visualizations)}
           />
         );
       case 'tool_call':
         return (
-          <ToolCallRenderer 
+          <ToolCallMessage 
             toolCalls={message.metadata?.toolCalls || []}
           />
         );
