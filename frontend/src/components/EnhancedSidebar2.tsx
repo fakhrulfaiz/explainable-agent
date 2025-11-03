@@ -662,7 +662,7 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                   <span className="ml-2 text-xs font-medium whitespace-nowrap overflow-hidden">
                     Settings
                   </span>
-                  <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${settingsOpen ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`w-4 h-4 mr-2 ml-auto transition-transform ${settingsOpen ? 'rotate-180' : ''}`} />
                 </>
               )}
             </button>
