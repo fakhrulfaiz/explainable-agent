@@ -1,9 +1,9 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 
 // API client configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 const API_TIMEOUT = Number(import.meta.env.VITE_API_TIMEOUT ?? 120000);
-
+;
 class ApiClient {
   private client: AxiosInstance;
 
@@ -72,6 +72,7 @@ class ApiClient {
   // HTTP methods
   async get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
     const response = await this.client.get<T>(url, config);
+    console.log('API_BASE_URL', API_BASE_URL)
     return response.data;
   }
 

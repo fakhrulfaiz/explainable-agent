@@ -100,7 +100,10 @@ const Test: React.FC = () => {
             ToolCallMessage Component
           </h2>
           <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-            <ToolCallMessage toolCalls={mockToolCalls} />
+            <ToolCallMessage 
+              toolCalls={mockToolCalls}
+              content={"I'm about to run a couple of tools to fetch results and compute values.\n\n- First I'll search for resources related to React hooks.\n- Then I'll evaluate a simple calculation to confirm the math."}
+            />
           </div>
         </div>
 

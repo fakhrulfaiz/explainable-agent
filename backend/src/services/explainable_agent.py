@@ -257,6 +257,7 @@ class ExplainableAgent:
         graph.add_node("agent", self.agent_node)
         graph.add_node("general_agent", self.general_agent_node)
         graph.add_node("tools", self.tools_node)
+        graph.add_node("tool_explanation", self.tool_explanation_node)
         graph.add_node("explain", self.explainer_node)
         graph.add_node("human_feedback", self.human_feedback)
         
@@ -291,10 +292,11 @@ class ExplainableAgent:
             "agent",
             self.should_continue,
             {
-                "tools": "tools",
+                "tools": "tool_explanation",
                 "end": END
             }
         )
+        graph.add_edge("tool_explanation", "tools")
         graph.add_conditional_edges(
             "tools",
             self.should_explain,
@@ -476,6 +478,76 @@ Guidelines:
             "step_counter": state.get("step_counter", 0),
             "query": state.get("query", ""),
             "plan": state.get("plan", "")
+        }
+    
+    def tool_explanation_node(self, state: ExplainableAgentState):
+        """
+        Generates a brief explanation of upcoming tool calls before execution.
+        """
+        messages = state["messages"]
+        if not messages:
+            return {"messages": []}
+        
+        last_message = messages[-1]
+        
+        # Early return if no tool calls
+        if not getattr(last_message, 'tool_calls', None):
+            return {"messages": []}
+        
+        # Build tool name to description mapping
+        tool_name_to_desc = {}
+        for tool in getattr(self, 'tools', []) or []:
+            name = getattr(tool, 'name', None)
+            desc = getattr(tool, 'description', None)
+            if name:
+                tool_name_to_desc[name] = desc or "No description available"
+        
+        # Format tool descriptions with args
+        tool_descriptions = []
+        for call in last_message.tool_calls:
+            name = call.get('name', 'unknown')
+            args = call.get('args', {})
+            desc = tool_name_to_desc.get(name, "No description available")
+            
+            # Format args compactly
+            args_str = json.dumps(args, ensure_ascii=False) if not isinstance(args, str) else args
+            if len(args_str) > 200:
+                args_str = args_str[:200] + "..."
+            
+            tool_descriptions.append(f"- {name}: {desc}\n  Args: {args_str}")
+        
+        tools_text = "\n".join(tool_descriptions)
+        
+        # Generate explanation with full context
+        system_prompt = (
+            "Provide a concise, user-facing explanation (1–2 sentences) of the next step you will take to answer the question.\n\n"
+            f"Internal context (do not expose tool names):\n{tools_text}\n\n"
+            "Use a clear, professional, conversational tone. Focus on the intent and expected outcome, not too detailed on implementation details. "
+            "Do not mention specific tool names or parameters.\n\n"
+            "Examples: \n"
+            "- 'I'll first review the database structure to identify where this information is stored.'\n"
+            "- 'Now, I'll run a targeted query to retrieve the relevant records and summarize the results.'"
+        )
+
+        
+        try:
+            # Include all previous messages for context
+            explanation_messages = [SystemMessage(content=system_prompt)] + messages[:-1]
+            response = self.llm.invoke(explanation_messages)
+            explanation_text = getattr(response, 'content', str(response))
+        except Exception:
+            explanation_text = f"Running the following tools:\n{tools_text}"
+        
+        # Modify the existing message instead of adding new one
+        modified_message = AIMessage(
+            content=explanation_text,
+            tool_calls=getattr(last_message, 'tool_calls', None),
+            id=getattr(last_message, 'id', None)
+        )
+        
+        # Replace the last message
+        return {
+            "messages": messages[:-1] + [modified_message]
         }
     
     def tools_node(self, state: ExplainableAgentState):

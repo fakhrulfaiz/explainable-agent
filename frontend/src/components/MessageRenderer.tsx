@@ -20,7 +20,6 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
           <ExplorerMessage 
             data={message.metadata?.explorerData}
             onOpenExplorer={() => onAction?.('openExplorer', message.metadata?.explorerData)}
-            content={message.content}
           />
         );
     
@@ -36,6 +35,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
         return (
           <ToolCallMessage 
             toolCalls={message.metadata?.toolCalls || []}
+            content={message.content}
           />
         );
       case 'message':

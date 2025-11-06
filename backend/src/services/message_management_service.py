@@ -99,8 +99,9 @@ class MessageManagementService:
             # For assistant messages, we trust the backend - thread should exist since 
             # assistant messages are only created during active graph execution
             
-            # Generate unique message ID
-            message_id = int(time.time() * 1000000)
+            # Generate unique message ID only if not provided
+            if message_id is None:
+                message_id = int(time.time() * 1000000)
             
             # Sanitize content
             content = self._sanitize_content(content)

@@ -61,7 +61,6 @@ export interface ChatComponentProps {
   className?: string;
   placeholder?: string;
   disabled?: boolean;
-  onMessageCreated?: (message: Message) => void;
   onMessageUpdated?: (message: Message) => void;
   threadTitle?: string;
   onTitleChange?: (newTitle: string) => void;

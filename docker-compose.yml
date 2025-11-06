@@ -12,7 +12,7 @@ services:
       # Named volume for Python virtual environment
       - backend_venv:/app/env
       # Named volume for logs persistence
-      - backend_logs:/app/logs
+      - ./backend/logs:/app/logs
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
@@ -41,7 +41,8 @@ services:
       # Anonymous volume for node_modules to avoid conflicts with host
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost/api
+      # - VITE_API_URL=http://localhost/api
+      - VITE_API_URL=https://alisa-creedless-colene.ngrok-free.dev/api
       - VITE_DEV_MODE=true
     depends_on:
       - backend
@@ -95,8 +96,6 @@ services:
 
 volumes:
   backend_venv:
-    driver: local
-  backend_logs:
     driver: local
   mongodb_data:
     name: explainable-agent-mongodb-data

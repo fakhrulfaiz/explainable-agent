@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from sse_starlette.sse import EventSourceResponse
 from uuid import uuid4
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 import logging
 import json
 import asyncio
 import time
+import time as _time
 
 from src.models.schemas import StartRequest, GraphResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
@@ -30,6 +31,33 @@ def get_explainable_agent(request: Request) -> ExplainableAgent:
 
 # Store run configurations for streaming
 run_configs = {}
+
+def _extract_stream_or_message_id(msg: Any, preferred_key: str = 'message_id') -> Any:
+    """Robustly extracts a stream ID (string) or message ID (int) from a chunk,
+    falling back to a dynamic timestamp if needed."""
+    # Prefer explicit tool_call_id when present (useful for associating streams with tool calls)
+    tool_call_id = getattr(msg, 'tool_call_id', None)
+    if tool_call_id is not None and tool_call_id != "":
+        if isinstance(tool_call_id, str) and tool_call_id.isdigit():
+            return int(tool_call_id)
+        return tool_call_id
+    msg_id = getattr(msg, 'id', None)
+    if not msg_id and hasattr(msg, 'response_metadata'):
+        meta = getattr(msg, 'response_metadata') or {}
+        for key in [preferred_key, 'id']:
+            mid = meta.get(key)
+            if mid is not None:
+                msg_id = mid
+                break
+    if isinstance(msg_id, str):
+        try:
+            if msg_id.isdigit():
+                return int(msg_id)
+        except:
+            pass
+    if msg_id is None or (isinstance(msg_id, str) and not msg_id):
+        return int(_time.time() * 1000000)
+    return msg_id
 
 @router.post("/start", response_model=GraphResponse)
 def create_graph_streaming(request: StartRequest):
@@ -512,11 +540,13 @@ async def stream_graph(request: Request, thread_id: str,
                 elif hasattr(msg, 'content') and msg.content:
                     if type(msg).__name__ in ['AIMessageChunk']:
                         # Filter: only emit tokens/messages from planner or agent nodes
-                        if node_name not in ['planner', 'agent']:
+                        if node_name not in ['planner', 'agent', 'tool_explanation']:
                             continue
                     
                         # Preserve whitespace inside chunks to avoid concatenated words
                         chunk_text = msg.content
+                        # Extract a stable message id for streaming chunks
+                        msg_id = _extract_stream_or_message_id(msg, preferred_key='message_id')
                         if chunk_text.startswith("{") or buffer:
                             buffer += chunk_text
                             try:
@@ -527,7 +557,8 @@ async def stream_graph(request: Request, thread_id: str,
                                 "data": json.dumps({
                                     "content": parsed.get("content", ""),
                                     "node": node_name,
-                                    "type": "feedback_answer"
+                                    "type": "feedback_answer",
+                                    "stream_id": msg_id
                                     })
                                     }
                                 buffer = ""  # reset after full parse
@@ -537,16 +568,19 @@ async def stream_graph(request: Request, thread_id: str,
                         else:
                             # Normal token streaming
                             token_data = json.dumps({
-                            "content": msg.content,
-                            "node": node_name,
-                            "type": "chunk"
-                             })
+                                "content": msg.content,
+                                "node": node_name,
+                                "type": "chunk",
+                                "stream_id": msg_id
+                            })
                             yield {"event": "token", "data": token_data}
                     elif type(msg).__name__ in ['AIMessage']:
+                        msg_id_final = _extract_stream_or_message_id(msg, preferred_key='stream_id')
                         yield {"event": "message", "data": json.dumps({
                             "content": msg.content,
                             "node": node_name,
-                            "type": "message"
+                            "type": "message",
+                            "message_id": msg_id_final
                         })}
             
             # After streaming completes, emit final payloads
@@ -556,11 +590,18 @@ async def stream_graph(request: Request, thread_id: str,
             steps = values.get("steps", [])
             plan = values.get("plan", "")
             query = values.get("query", "")
-            # Determine assistant final response
+            # Determine assistant final response and its message_id
             assistant_response = ""
+            assistant_message_id: int | None = None
             for m in reversed(messages):
                 if (hasattr(m, 'content') and m.content and type(m).__name__ == 'AIMessage' and (not hasattr(m, 'tool_calls') or not m.tool_calls)):
                     assistant_response = m.content
+                    # Extract a numeric message id if present
+                    try:
+                        extracted = _extract_stream_or_message_id(m, preferred_key='message_id')
+                        assistant_message_id = int(extracted) if isinstance(extracted, (int, str)) and str(extracted).isdigit() else None
+                    except Exception:
+                        assistant_message_id = None
                     break
 
             # Compute checkpoint_id if present
@@ -615,7 +656,8 @@ async def stream_graph(request: Request, thread_id: str,
                             content=assistant_response,
                             message_type="message",
                             checkpoint_id=checkpoint_id,
-                            needs_approval=True  # This message needs approval
+                            needs_approval=True,  # This message needs approval
+                            message_id=assistant_message_id
                         )
                         logger.info(f"Saved assistant message {saved_message.message_id} for approval in thread {thread_id}")
                     except Exception as e:
@@ -636,7 +678,8 @@ async def stream_graph(request: Request, thread_id: str,
                             content=assistant_response,
                             message_type="message",
                             checkpoint_id=checkpoint_id,
-                            needs_approval=False
+                            needs_approval=False,
+                            message_id=assistant_message_id
                         )
                     
                     # Save explorer message if steps exist

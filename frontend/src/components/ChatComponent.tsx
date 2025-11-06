@@ -60,12 +60,12 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   className = "",
   placeholder = "Type your message...",
   disabled = false,
-  onMessageCreated,
   onMessageUpdated,
   threadTitle,
   onTitleChange,
   sidebarExpanded = true
 }) => {
+ 
   // Use UI state context for loading and execution state
   const { state, setExecutionStatus, setLoading } = useUIState();
   
@@ -159,11 +159,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     // Add explorer message after a short delay to ensure proper ordering
     setTimeout(() => {
       setMessages(prev => [...prev, explorerMessage]);
-      if (typeof onMessageCreated === 'function') {
-        onMessageCreated(explorerMessage);
-      }
     }, 50);
-  }, [contextThreadId, currentThreadId, onMessageCreated]);
+  }, [contextThreadId, currentThreadId]);
 
   // Helper function to handle response and create special messages if needed
   const handleResponse = useCallback((response: HandlerResponse): string => {
@@ -183,13 +180,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       } as any;
       setTimeout(() => {
         setMessages(prev => [...prev, vizMessage]);
-        if (typeof onMessageCreated === 'function') {
-          onMessageCreated(vizMessage);
-        }
       }, 50);
     }
     return response.message;
-  }, [createExplorerMessage, contextThreadId, currentThreadId, onMessageCreated]);
+  }, [createExplorerMessage, contextThreadId, currentThreadId]);
 
 
 // Helper function to handle streaming errors
@@ -344,9 +338,7 @@ const updateMessageCallback = useCallback(
           };
           
           setMessages(prev => [...prev, newMessage]);
-          if (typeof onMessageCreated === 'function') {
-            onMessageCreated(newMessage);
-          }
+       
           return;
         }
         if ("content" in parsed) {
@@ -394,11 +386,6 @@ const updateMessageCallback = useCallback(
 
       setMessages(prev => [...prev, feedbackMessage]);
       setInputValue('');
-      
-      // Call onMessageCreated for the feedback message
-      if (typeof onMessageCreated === 'function') {
-        onMessageCreated(feedbackMessage);
-      }
       
       // Call the feedback handler
       if (onFeedback) {
@@ -488,9 +475,7 @@ const updateMessageCallback = useCallback(
     };
 
     setMessages(prev => [...prev, newUserMessage]);
-  if (typeof onMessageCreated === 'function') {
-    onMessageCreated(newUserMessage);
-  }
+  
 
     try {
       const response = await onSendMessage(userMessage, messages, { usePlanning, useExplainer, attachedFiles });
@@ -573,9 +558,6 @@ const updateMessageCallback = useCallback(
                         }]
                       }
                     };
-                    if (typeof onMessageCreated === 'function') {
-                      onMessageCreated(toolCallMessage);
-                    }
                     return [...prev, toolCallMessage];
                   }
                 });
@@ -702,9 +684,7 @@ const updateMessageCallback = useCallback(
         threadId: contextThreadId || currentThreadId || undefined
       };
         setMessages(prev => [...prev, assistantMessage]);
-        if (typeof onMessageCreated === 'function') {
-          onMessageCreated(assistantMessage);
-        }
+        
       if (response.needsApproval) {
         setPendingApproval(assistantMessage.id);
       } else {
@@ -723,9 +703,6 @@ const updateMessageCallback = useCallback(
       };
 
       setMessages(prev => [...prev, errorMessage]);
-      if (typeof onMessageCreated === 'function') {
-        onMessageCreated(errorMessage);
-      }
     } 
   };
 
@@ -850,10 +827,7 @@ const updateMessageCallback = useCallback(
                   ? { ...m, content: `Error: ${(streamErr as Error).message || 'Streaming failed'}`, isError: true, isStreaming: false }
                   : m
               ));
-              if (typeof onMessageCreated === 'function') {
-                const finalMsg = messagesRef.current.find(m => m.id === streamingMsgId);
-                if (finalMsg) onMessageCreated(finalMsg);
-              }
+
             } finally {
               setStreamingActive(false);
             }
@@ -872,11 +846,7 @@ const updateMessageCallback = useCallback(
             threadId: contextThreadId || currentThreadId || undefined
           };
           setMessages(prev => [...prev, resultMessage]);
-            if (typeof onMessageCreated === 'function') {
-              onMessageCreated(resultMessage);
-            }
-            
-            await updateMessageFlags(messageId, { approved: true, needsApproval: false });
+          await updateMessageFlags(messageId, { approved: true, needsApproval: false });
           }
         }
       }
@@ -956,10 +926,6 @@ const updateMessageCallback = useCallback(
           };
           
           setMessages(prev => [...prev, resultMessage]);
-          if (typeof onMessageCreated === 'function') {
-            const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
-            if (finalMsg) onMessageCreated(finalMsg);
-          }
         }
       }
     } catch (error) {
@@ -973,10 +939,6 @@ const updateMessageCallback = useCallback(
       };
 
       setMessages(prev => [...prev, errorMessage]);
-      if (typeof onMessageCreated === 'function') {
-        const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
-        if (finalMsg) onMessageCreated(finalMsg);
-      }
     } finally {
       setLoading(false);
       }
@@ -1015,10 +977,6 @@ const updateMessageCallback = useCallback(
           };
           
           setMessages(prev => [...prev, resultMessage]);
-          if (typeof onMessageCreated === 'function') {
-            const finalMsg = messagesRef.current.find(m => m.id === Date.now() + 1);
-            if (finalMsg) onMessageCreated(finalMsg);
-          }
         }
       } else {
         // Fallback to local retry logic if no parent handler
@@ -1046,9 +1004,6 @@ const updateMessageCallback = useCallback(
               };
               
               setMessages(prev => [...prev, resultMessage]);
-              if (typeof onMessageCreated === 'function') {
-                onMessageCreated(resultMessage);
-              }
               if (needsApproval) {
                 setPendingApproval(resultMessage.id);
               }
@@ -1126,7 +1081,7 @@ const updateMessageCallback = useCallback(
            </div>
 
           {/* Desktop: Background with gradient bottom */}
-          <div className={`hidden md:block fixed top-0 left-0 right-0 z-30 transition-[left] duration-300 ease-in-out`}>
+         <div className={`hidden md:block fixed top-0 left-0 right-0 z-30 transition-[left] duration-300 ease-in-out`}>
             {/* Main background */}
             <div className={`bg-white dark:bg-neutral-800 py-3 pr-4 ${sidebarExpanded ? 'pl-84' : 'pl-16'} transition-[padding-left] duration-300 ease-in-out`}>
               <ThreadTitle 
@@ -1143,7 +1098,7 @@ const updateMessageCallback = useCallback(
       
       {/* Messages - scrollable area with padding for fixed input and header */}
       <div 
-        className={`flex-1 space-y-4 min-h-0 pb-40 overflow-y-auto slim-scroll ${threadTitle ? 'pt-20' : 'pt-8'}`}
+        className={`flex-1 space-y-4 min-h-0 pb-40 overflow-y-auto slim-scroll ${threadTitle ? 'pt-38' : 'pt-8'}`}
       >
         <div className="max-w-3xl mx-auto px-4">
         {messages.map((message) => (

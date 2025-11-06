@@ -255,7 +255,7 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
 
       {/* Sidebar */}
       <aside
-       className={`fixed left-0 top-0 h-screen bg-gray-50 dark:bg-neutral-800 border-r border-gray-200 dark:border-neutral-700 transition-all duration-300 ease-in-out z-50 ${getSidebarClasses()} flex flex-col overflow-hidden`}
+       className={`fixed left-0 top-0 h-[100dvh] bg-gray-50 dark:bg-neutral-800 border-r border-gray-200 dark:border-neutral-700 transition-all duration-300 ease-in-out z-50 ${getSidebarClasses()} flex flex-col overflow-hidden`}
       >
         <div className={`flex flex-col h-full ${isMobile && isExpanded ? 'w-96 max-w-96' : isMobile ? 'w-0' : 'w-full'} overflow-hidden`}>
           {/* Header */}
@@ -634,7 +634,7 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-2 border-t border-gray-200 dark:border-neutral-700 overflow-hidden space-y-1">
+          <div className="p-2 border-t border-gray-200 dark:border-neutral-700 overflow-hidden space-y-1 pb-[env(safe-area-inset-bottom)]">
           {isExpanded && (
             <Button
               onClick={loadThreads}
@@ -667,7 +667,7 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
               )}
             </button>
             {isExpanded && settingsOpen && (
-              <div className="mt-1 border border-gray-200 dark:border-neutral-700 rounded-md shadow-sm bg-white dark:bg-neutral-900">
+              <div className="mt-1 border border-gray-200 dark:border-neutral-700 rounded-md shadow-sm bg-white dark:bg-neutral-900">
                 {/* Dark Mode Toggle */}
                 <div className="flex items-center justify-between px-3 py-2">
                   <span className="text-sm text-gray-700 dark:text-white">Dark Mode</span>

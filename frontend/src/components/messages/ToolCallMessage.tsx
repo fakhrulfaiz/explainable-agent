@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { markdownComponents } from '../../utils/markdownComponents';
 import {
   Accordion,
   AccordionContent,
@@ -38,9 +39,10 @@ interface ToolCall {
 
 interface ToolCallMessageProps {
   toolCalls: ToolCall[];
+  content?: string;
 }
 
-export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls }) => {
+export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, content }) => {
   const getStatusColor = (status: ToolCallStatus): string => {
     switch (status) {
       case 'approved':
@@ -71,7 +73,15 @@ export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls }) =
   };
 
   return (
-    <Accordion type="single" collapsible className="space-y-2">
+    <>
+      {content && (
+        <div className="mb-3 prose prose-sm dark:prose-invert max-w-none">
+          <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+            {content}
+          </ReactMarkdown>
+        </div>
+      )}
+      <Accordion type="single" collapsible className="space-y-2">
       {toolCalls.map((call) => (
         <AccordionItem
           key={call.id}
@@ -129,7 +139,8 @@ export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls }) =
             </AccordionContent>
         </AccordionItem>
       ))}
-    </Accordion>
+      </Accordion>
+    </>
   );
 };
 

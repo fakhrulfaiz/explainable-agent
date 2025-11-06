@@ -54,7 +54,7 @@ const Message: React.FC<MessageComponentProps> = ({
               ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
               : message.disapproved
               ? 'bg-red-50 dark:bg-red-900/20 text-gray-700 dark:text-gray-300 border border-red-200 dark:border-red-800'
-              : 'bg-white dark:bg-neutral-800 text-gray-800 dark:text-neutral-200 border border-gray-200 dark:border-neutral-700'
+            : 'bg-white dark:bg-neutral-800 text-gray-800 dark:text-neutral-200'
           }`}>
             <div className="break-words prose max-w-none">
               <MessageRenderer message={message} onAction={handleAction} />
@@ -79,7 +79,6 @@ const Message: React.FC<MessageComponentProps> = ({
         <div className={`text-xs text-gray-500 dark:text-neutral-400 mt-0.5 mb-2 ${
           message.role === 'user' ? 'text-right' : 'text-left'
         }`}>
-          {message.timestamp.toLocaleTimeString()}
           {message.isFeedback && (
             <span className="ml-2 text-blue-600 font-medium">Feedback</span>
           )}

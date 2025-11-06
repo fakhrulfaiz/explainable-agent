@@ -188,9 +188,6 @@ const ChatWithApproval: React.FC = () => {
     }
   };
 
-  const handleMessageCreated = async (_msg: Message) => {
-    // All messages (user and assistant) are now saved by backend during graph execution
-  };
 
   const handleMessageUpdated = async (msg: Message) => {
     // Handle persistent storage of message flag updates
@@ -881,7 +878,6 @@ const ChatWithApproval: React.FC = () => {
                 initialMessages={restoredMessages}
                 placeholder="Ask me anything..."
                 className="h-full"
-                onMessageCreated={handleMessageCreated}
                 onMessageUpdated={handleMessageUpdated}
                 threadTitle={currentThreadTitle}
                 onTitleChange={handleTitleChange}

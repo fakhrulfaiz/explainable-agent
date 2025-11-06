@@ -59,9 +59,9 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   initialMessages = [],
   className = "",
   placeholder = "Type your message...",
-  disabled = false,
-  onMessageCreated
+  disabled = false
 }) => {
+  const onMessageCreated = undefined as unknown as ((message: MessageType) => void);
   // Use UI state context for loading and execution state
   const { state, setExecutionStatus, setLoading } = useUIState();
   
@@ -156,11 +156,8 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     // Add explorer message after a short delay to ensure proper ordering
     setTimeout(() => {
       setMessages(prev => [...prev, explorerMessage]);
-      if (typeof onMessageCreated === 'function') {
-        onMessageCreated(explorerMessage);
-      }
     }, 50);
-  }, [contextThreadId, currentThreadId, onMessageCreated]);
+  }, [contextThreadId, currentThreadId]);
 
   // Helper function to handle response and create special messages if needed
   const handleResponse = useCallback((response: HandlerResponse): string => {
@@ -180,13 +177,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       } as any;
       setTimeout(() => {
         setMessages(prev => [...prev, vizMessage]);
-        if (typeof onMessageCreated === 'function') {
-          onMessageCreated(vizMessage);
-        }
       }, 50);
     }
     return response.message;
-  }, [createExplorerMessage, contextThreadId, currentThreadId, onMessageCreated]);
+  }, [createExplorerMessage, contextThreadId, currentThreadId]);
 
 
 // Helper function to handle streaming errors
@@ -330,9 +324,6 @@ const updateMessageCallback = useCallback(
     };
 
     setMessages(prev => [...prev, newUserMessage]);
-  if (typeof onMessageCreated === 'function') {
-    onMessageCreated(newUserMessage);
-  }
 
     try {
       const response = await onSendMessage(userMessage, messages, { usePlanning, useExplainer, attachedFiles });
