@@ -106,7 +106,7 @@ export default function AuthConfirm() {
               <CardDescription>There was a problem confirming your account</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-red-500">{error}</p>
+              <p className="text-sm text-destructive">{error}</p>
             </CardContent>
           </Card>
         </div>

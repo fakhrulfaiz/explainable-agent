@@ -26,11 +26,7 @@ const AppContent: React.FC = () => {
   }, []);
 
   return (
-    <div className={`h-screen flex flex-col transition-colors duration-200 ${
-      isDarkMode 
-        ? 'bg-neutral-800 text-white' 
-        : 'bg-gray-50 text-gray-900'
-    }`}>
+    <div className="h-screen flex flex-col transition-colors duration-200 bg-background text-foreground">
       <div className="flex-1 flex flex-col min-h-0">
         <Routes>
           {/* 🟢 Public routes - anyone can access */}

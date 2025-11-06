@@ -39,14 +39,14 @@ export const ExplorerMessage: React.FC<ExplorerMessageProps> = ({
   return (
     <div 
       onClick={onOpenExplorer}
-      className="border border-gray-200 dark:border-neutral-700 rounded-lg p-4 bg-white dark:bg-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-700 cursor-pointer transition-colors"
+      className="border border-border rounded-lg p-4 bg-background hover:bg-accent cursor-pointer transition-colors"
     >
-      <div className="font-medium text-gray-900 dark:text-white mb-2 max-w-full">
-        <span className="text-blue-600 dark:text-blue-400 text-sm font-normal">Question: </span>
+      <div className="font-medium text-foreground mb-2 max-w-full">
+        <span className="text-primary text-sm font-normal">Question: </span>
         <span className="truncate block">{getUserQuestion()}</span>
       </div>
       
-      <div className="text-sm text-gray-500 dark:text-neutral-400">
+      <div className="text-sm text-muted-foreground">
         {getSummary()}
       </div>
     </div>

@@ -13,6 +13,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from './ui/collapsible';
 
 // Hook to detect mobile viewport
 const useIsMobile = () => {
@@ -66,7 +71,6 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
     threadTitle: ''
   });
   const { user, signOut } = useAuth();
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Initialize sidebar state on mount: collapsed on mobile, expanded on desktop
   useEffect(() => {
@@ -238,7 +242,7 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
             e.stopPropagation();
             toggleExpanded();
           }}
-          className="fixed top-4 left-4 z-50 hover:bg-gray-100 dark:hover:bg-neutral-700 w-10 h-10 focus:outline-none focus-visible:ring-0 bg-white dark:bg-neutral-800 border border-gray-200 dark:border-neutral-700 shadow-sm"
+          className="fixed top-4 left-4 z-50 w-10 h-10 focus:outline-none focus-visible:ring-0 bg-card hover:bg-accent border border-border shadow-sm"
           title="Open sidebar"
         >
           <PanelLeftOpen className="h-4 w-4" />
@@ -255,17 +259,17 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
 
       {/* Sidebar */}
       <aside
-       className={`fixed left-0 top-0 h-[100dvh] bg-gray-50 dark:bg-neutral-800 border-r border-gray-200 dark:border-neutral-700 transition-all duration-300 ease-in-out z-50 ${getSidebarClasses()} flex flex-col overflow-hidden`}
+       className={`fixed left-0 top-0 h-[100dvh] bg-background border-r border-sidebar-border transition-all duration-300 ease-in-out z-50 ${getSidebarClasses()} flex flex-col overflow-hidden`}
       >
         <div className={`flex flex-col h-full ${isMobile && isExpanded ? 'w-96 max-w-96' : isMobile ? 'w-0' : 'w-full'} overflow-hidden`}>
           {/* Header */}
-          <div className="p-2 space-y-1 border-b border-gray-200 dark:border-neutral-700 overflow-hidden">
-          {/* Toggle Button */}
-          <button
-            onClick={toggleExpanded}
-            className="w-full h-10 flex items-center pl-3 hover:bg-gray-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
-            title={!isExpanded ? "Expand sidebar" : "Collapse sidebar"}
-          >
+          <div className="p-2 space-y-1 border-b border-border overflow-hidden">
+          {/* Toggle Button */}
+          <button
+            onClick={toggleExpanded}
+		    className="w-full h-10 flex items-center pl-3 bg-transparent hover:bg-accent rounded-md transition-colors"
+            title={!isExpanded ? "Expand sidebar" : "Collapse sidebar"}
+          >
             {isExpanded ? (
               <PanelLeftClose className="h-5 w-5 flex-shrink-0" />
             ) : (
@@ -278,12 +282,12 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
             )}
           </button>
 
-          {/* New Thread Button */}
-          <button
-            onClick={handleNewThread}
-            className="w-full h-10 flex items-center pl-3 hover:bg-gray-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
-            title={!isExpanded ? "New Thread" : undefined}
-          >
+          {/* New Thread Button */}
+		  <button
+            onClick={handleNewThread}
+		    className="w-full h-10 flex items-center pl-3 bg-transparent hover:bg-accent rounded-md transition-colors"
+            title={!isExpanded ? "New Thread" : undefined}
+          >
             <Plus className="h-5 w-5 flex-shrink-0" />
             {isExpanded && (
               <span className="ml-3 font-medium whitespace-nowrap overflow-hidden">
@@ -294,16 +298,16 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
         </div>
 
         {/* Search Bar - only show when expanded */}
-        {isExpanded && (
-          <div className="p-3 border-b border-gray-200 dark:border-neutral-700">
+			{isExpanded && (
+			  <div className="p-3 border-b border-border">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-neutral-400" />
+			      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 type="text"
                 placeholder="Search chats..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 bg-white dark:bg-neutral-800 border-gray-300 dark:border-neutral-600"
+			        className="w-full pl-9"
               />
             </div>
           </div>
@@ -313,23 +317,23 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
         <div className="flex-1 overflow-hidden min-w-0">
           <ScrollArea className="h-full w-full">
             {isExpanded ? (
-              loading ? (
-                <div className="p-4 text-center text-gray-500 dark:text-neutral-400 text-sm">
+			      loading ? (
+			        <div className="p-4 text-center text-muted-foreground text-sm">
                   Loading threads...
                 </div>
-              ) : error ? (
-                <div className="p-4 text-center text-red-500 text-sm">
+			      ) : error ? (
+			        <div className="p-4 text-center text-destructive text-sm">
                   {error}
                   <Button 
                     onClick={loadThreads}
                     variant="link"
-                    className="block mx-auto mt-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+			            className="block mx-auto mt-2"
                   >
                     Retry
                   </Button>
                 </div>
               ) : filteredThreads.length === 0 ? (
-                <div className="p-4 text-center text-gray-500 dark:text-neutral-400 text-sm">
+			        <div className="p-4 text-center text-muted-foreground text-sm">
                   {searchQuery ? 'No matching threads' : 'No chat threads found'}
                 </div>
               ) : (
@@ -338,15 +342,15 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                   {groupedThreads.today.length > 0 && (
                     <>
                       <div className="px-3 py-2">
-                        <div className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Today</div>
+			                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Today</div>
                       </div>
                       {groupedThreads.today.map((thread) => (
                     <div
                       key={thread.thread_id}
                       className={`relative group rounded-lg transition-colors min-w-0 ${
                         selectedThreadId === thread.thread_id 
-                          ? 'bg-gray-100 dark:bg-neutral-700' 
-                          : 'hover:bg-gray-50 dark:hover:bg-neutral-600'
+			                  ? 'bg-accent' 
+			                  : 'hover:bg-accent'
                       }`}
                     >
                       <div
@@ -368,18 +372,18 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                                   }
                                 }}
                                 onBlur={() => handleSaveTitle(thread.thread_id)}
-                                className="flex-1 h-7 text-sm bg-white border-gray-300 text-gray-900 dark:bg-neutral-700 dark:text-white min-w-0 max-w-full"
+			                        className="flex-1 h-7 text-sm bg-input border-border text-foreground min-w-0 max-w-full"
                                 autoFocus
                               />
                             </div>
                           ) : (
                             <>
-                              <div className="font-medium text-sm text-gray-900 dark:text-white min-w-0 flex items-center">
+			                      <div className="font-medium text-sm text-foreground min-w-0 flex items-center">
                                 <MessageSquare className="w-3 h-3 mr-2 flex-shrink-0" />
                                 <span className="flex-1 truncate min-w-0">{thread.title || 'Untitled Chat'}</span>
                               </div>
                               {thread.last_message && (
-                                <div className="text-xs text-gray-500 dark:text-neutral-400 truncate whitespace-nowrap mt-0.5 min-w-0 flex-1">
+			                        <div className="text-xs text-muted-foreground truncate whitespace-nowrap mt-0.5 min-w-0 flex-1">
                                   {thread.last_message}
                                 </div>
                               )}
@@ -393,11 +397,11 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
-                                  className="p-1.5 hover:bg-gray-200 dark:hover:bg-neutral-700 rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center"
+                                  className="p-1.5 hover:bg-accent rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center"
                                   title="Thread options"
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  <MoreVertical className="w-5 h-5 text-gray-800 dark:text-neutral-300" />
+                                  <MoreVertical className="w-5 h-5 text-foreground" />
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-36">
@@ -436,15 +440,15 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                   {groupedThreads.yesterday.length > 0 && (
                     <>
                       <div className="px-3 py-2">
-                        <div className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Yesterday</div>
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Yesterday</div>
                       </div>
                       {groupedThreads.yesterday.map((thread) => (
                     <div
                       key={thread.thread_id}
                       className={`relative group rounded-lg transition-colors min-w-0 ${
                         selectedThreadId === thread.thread_id 
-                          ? 'bg-gray-100 dark:bg-neutral-700' 
-                          : 'hover:bg-gray-50 dark:hover:bg-neutral-600'
+                          ? 'bg-accent' 
+                          : 'hover:bg-accent'
                       }`}
                     >
                       <div
@@ -466,18 +470,18 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                                   }
                                 }}
                                 onBlur={() => handleSaveTitle(thread.thread_id)}
-                                className="flex-1 h-7 text-sm bg-white border-gray-300 text-gray-900 dark:bg-neutral-700 dark:text-white min-w-0 max-w-full"
+                                className="flex-1 h-7 text-sm bg-input border-border text-foreground min-w-0 max-w-full"
                                 autoFocus
                               />
                             </div>
                           ) : (
                             <>
-                              <div className="font-medium text-sm text-gray-900 dark:text-white min-w-0 flex items-center">
+                              <div className="font-medium text-sm text-foreground min-w-0 flex items-center">
                                 <MessageSquare className="w-3 h-3 mr-2 flex-shrink-0" />
                                 <span className="flex-1 truncate min-w-0">{thread.title || 'Untitled Chat'}</span>
                               </div>
                               {thread.last_message && (
-                                <div className="text-xs text-gray-500 dark:text-neutral-400 truncate whitespace-nowrap mt-0.5 min-w-0 flex-1">
+                                <div className="text-xs text-muted-foreground truncate whitespace-nowrap mt-0.5 min-w-0 flex-1">
                                   {thread.last_message}
                                 </div>
                               )}
@@ -491,11 +495,11 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
-                                  className="p-1.5 hover:bg-gray-200 dark:hover:bg-neutral-700 rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center"
+                                  className="p-1.5 hover:bg-accent rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center"
                                   title="Thread options"
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  <MoreVertical className="w-5 h-5 text-gray-800 dark:text-neutral-300" />
+                                  <MoreVertical className="w-5 h-5 text-foreground" />
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-36">
@@ -534,15 +538,15 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                   {groupedThreads.older.length > 0 && (
                     <>
                       <div className="px-3 py-2">
-                        <div className="text-xs font-semibold text-gray-500 dark:text-neutral-400 uppercase tracking-wider">Older</div>
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Older</div>
                       </div>
                       {groupedThreads.older.map((thread) => (
                     <div
                       key={thread.thread_id}
                       className={`relative group rounded-lg transition-colors min-w-0 ${
                         selectedThreadId === thread.thread_id 
-                          ? 'bg-gray-100 dark:bg-neutral-700' 
-                          : 'hover:bg-gray-50 dark:hover:bg-neutral-600'
+                          ? 'bg-accent' 
+                          : 'hover:bg-accent'
                       }`}
                     >
                       <div
@@ -564,18 +568,18 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                                   }
                                 }}
                                 onBlur={() => handleSaveTitle(thread.thread_id)}
-                                className="flex-1 h-7 text-sm bg-white border-gray-300 text-gray-900 dark:bg-neutral-700 dark:text-white min-w-0 max-w-full"
+                                className="flex-1 h-7 text-sm bg-input border-border text-foreground min-w-0 max-w-full"
                                 autoFocus
                               />
                             </div>
                           ) : (
                             <>
-                              <div className="font-medium text-sm text-gray-900 dark:text-white min-w-0 flex items-center">
+                              <div className="font-medium text-sm text-foreground min-w-0 flex items-center">
                                 <MessageSquare className="w-3 h-3 mr-2 flex-shrink-0" />
                                 <span className="flex-1 truncate min-w-0">{thread.title || 'Untitled Chat'}</span>
                               </div>
                               {thread.last_message && (
-                                <div className="text-xs text-gray-500 dark:text-neutral-400 truncate whitespace-nowrap mt-0.5 min-w-0 flex-1">
+                                <div className="text-xs text-muted-foreground truncate whitespace-nowrap mt-0.5 min-w-0 flex-1">
                                   {thread.last_message}
                                 </div>
                               )}
@@ -589,11 +593,11 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
-                                  className="p-1.5 hover:bg-gray-200 dark:hover:bg-neutral-700 rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center"
+                                  className="p-1.5 hover:bg-accent rounded transition-all flex-shrink-0 w-8 h-8 flex items-center justify-center"
                                   title="Thread options"
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  <MoreVertical className="w-5 h-5 text-gray-800 dark:text-neutral-300" />
+                                  <MoreVertical className="w-5 h-5 text-foreground" />
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-36">
@@ -633,57 +637,56 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
           </ScrollArea>
         </div>
 
-        {/* Footer */}
-          <div className="p-2 border-t border-gray-200 dark:border-neutral-700 overflow-hidden space-y-1 pb-[env(safe-area-inset-bottom)]">
+        {/* Footer */}
+          <div className="p-2 mb-2 border-t border-border overflow-hidden space-y-1 pb-[env(safe-area-inset-bottom)]">
           {isExpanded && (
             <Button
               onClick={loadThreads}
               variant="ghost"
-              className="w-full h-10 text-xs text-gray-600 dark:text-neutral-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-neutral-700 justify-start pl-3"
+			      className="w-full h-10 text-xs text-muted-foreground hover:text-foreground hover:bg-accent justify-start pl-3"
             >
               Refresh Threads
             </Button>
           )}
 
-          {/* Settings dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                if (isExpanded) {
-                  setSettingsOpen(prev => !prev);
-                }
-              }}
-              className="w-full h-10 flex items-center pl-3 hover:bg-gray-100 dark:hover:bg-neutral-700 rounded-md transition-colors"
-              title={!isExpanded ? "Settings" : undefined}
-            >
-              <Settings className="w-4 h-4 flex-shrink-0" />
-              {isExpanded && (
-                <>
-                  <span className="ml-2 text-xs font-medium whitespace-nowrap overflow-hidden">
-                    Settings
-                  </span>
-                  <ChevronDown className={`w-4 h-4 mr-2 ml-auto transition-transform ${settingsOpen ? 'rotate-180' : ''}`} />
-                </>
-              )}
-            </button>
-            {isExpanded && settingsOpen && (
-              <div className="mt-1 border border-gray-200 dark:border-neutral-700 rounded-md shadow-sm bg-white dark:bg-neutral-900">
-                {/* Dark Mode Toggle */}
-                <div className="flex items-center justify-between px-3 py-2">
-                  <span className="text-sm text-gray-700 dark:text-white">Dark Mode</span>
-                  <DarkModeToggle size="sm" />
-                </div>
-                <div className="border-t border-gray-200 dark:border-neutral-700 my-1" />
-                <button
-                  onClick={async () => { await signOut(); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Sign out{user?.email ? ` (${user.email})` : ''}
-                </button>
-              </div>
-            )}
-          </div>
+          {/* Settings Collapsible */}
+          {isExpanded ? (
+            <Collapsible className="w-full">
+              <CollapsibleTrigger
+                className="w-full h-10 flex items-center pl-3 bg-transparent hover:bg-accent rounded-md transition-colors"
+                title="Settings"
+              >
+                <Settings className="w-4 h-4 flex-shrink-0" />
+                <span className="ml-2 text-xs font-medium whitespace-nowrap overflow-hidden">
+                  Settings
+                </span>
+                <ChevronDown className="w-4 h-4 mr-2 ml-auto transition-transform duration-200 data-[state=open]:rotate-180" />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-1 border border-border rounded-md shadow-sm bg-card overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
+                {/* Dark Mode Toggle */}
+                <div className="flex items-center justify-between px-3 py-2">
+                  <span className="text-sm text-foreground">Dark Mode</span>
+                  <DarkModeToggle size="sm" />
+                </div>
+                <div className="border-t border-border my-1" />
+                <button
+                  onClick={async () => { await signOut(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground bg-transparent hover:bg-accent rounded"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign out{user?.email ? ` (${user.email})` : ''}
+                </button>
+              </CollapsibleContent>
+            </Collapsible>
+          ) : (
+            <button
+              className="w-full h-10 flex items-center pl-3 bg-transparent hover:bg-accent rounded-md transition-colors"
+              title="Settings"
+              disabled
+            >
+              <Settings className="w-4 h-4 flex-shrink-0" />
+            </button>
+          )}
         </div>
         </div>
       </aside>

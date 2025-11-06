@@ -185,8 +185,8 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
         ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
         className={compact
-          ? "flex items-center gap-1 text-xs text-gray-400 hover:text-gray-500"
-          : "flex items-center gap-1.5 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"}
+          ? "flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          : "flex items-center gap-1.5 px-2 py-1 text-xs bg-muted hover:bg-accent rounded-md transition-colors"}
         title="LLM Settings"
       >
         {compact ? (
@@ -205,13 +205,13 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
       </button>
 
       {isOpen && (
-        <div className={`absolute ${placeUp ? 'bottom-full mb-2' : 'top-full mt-2'} ${alignLeft ? 'left-0' : 'right-0'} w-72 bg-white border border-gray-200 rounded-md shadow-lg z-50`}>
+        <div className={`absolute ${placeUp ? 'bottom-full mb-2' : 'top-full mt-2'} ${alignLeft ? 'left-0' : 'right-0'} w-72 bg-popover border border-border rounded-md shadow-lg z-50`}>
           <div className="p-3">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="font-semibold text-gray-900 text-sm">LLM Configuration</h3>
+              <h3 className="font-semibold text-popover-foreground text-sm">LLM Configuration</h3>
               <button
                 onClick={() => setIsOpen(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-muted-foreground hover:text-foreground"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -219,22 +219,22 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
 
             {loading ? (
               <div className="flex items-center justify-center py-6">
-                <RefreshCw className="w-4 h-4 animate-spin text-blue-500" />
-                <span className="ml-2 text-xs text-gray-600">Loading...</span>
+                <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+                <span className="ml-2 text-xs text-muted-foreground">Loading...</span>
               </div>
             ) : config ? (
               <div className="space-y-3">
                 {/* Current Status */}
-                <div className="p-2 bg-gray-50 rounded-md">
-                  <div className="text-xs font-medium text-gray-700">Current:</div>
-                  <div className="text-sm font-semibold text-blue-600">
+                <div className="p-2 bg-muted rounded-md">
+                  <div className="text-xs font-medium text-foreground">Current:</div>
+                  <div className="text-sm font-semibold text-primary">
                     {config.provider} - {config.model}
                   </div>
                 </div>
 
                 {/* Provider Selection */}
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                  <label className="block text-xs font-medium text-foreground mb-1">
                     Provider
                   </label>
                   <select
@@ -243,7 +243,7 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                       setSelectedProvider(e.target.value);
                       setSelectedModel(''); // Reset model when provider changes
                     }}
-                    className="w-full px-2 py-1 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                    className="w-full px-2 py-1 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent text-xs bg-background text-foreground"
                   >
                     {config.available_providers.map(provider => (
                       <option key={provider} value={provider}>
@@ -256,13 +256,13 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                 {/* Model Selection */}
                 {selectedProvider && config.available_models[selectedProvider] && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                    <label className="block text-xs font-medium text-foreground mb-1">
                       Model
                     </label>
                     <select
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value)}
-                      className="w-full px-2 py-1 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                      className="w-full px-2 py-1 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent text-xs bg-background text-foreground"
                     >
                       <option value="">Select a model</option>
                       {config.available_models[selectedProvider].map(model => (
@@ -279,7 +279,7 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                   <div className="space-y-2">
                     {getProviderConfig(selectedProvider).needsApiKey && (
                       <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                        <label className="block text-xs font-medium text-foreground mb-1">
                           API Key (optional if set in env)
                         </label>
                         <input
@@ -287,14 +287,14 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                           value={apiKey}
                           onChange={(e) => setApiKey(e.target.value)}
                           placeholder={getProviderConfig(selectedProvider).placeholder}
-                          className="w-full px-2 py-1 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                          className="w-full px-2 py-1 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent text-xs bg-background text-foreground"
                         />
                       </div>
                     )}
 
                     {getProviderConfig(selectedProvider).needsBaseUrl && (
                       <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                        <label className="block text-xs font-medium text-foreground mb-1">
                           Base URL (optional if set in env)
                         </label>
                         <input
@@ -302,14 +302,14 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                           value={baseUrl}
                           onChange={(e) => setBaseUrl(e.target.value)}
                           placeholder={getProviderConfig(selectedProvider).placeholder}
-                          className="w-full px-2 py-1 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                          className="w-full px-2 py-1 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent text-xs bg-background text-foreground"
                         />
                       </div>
                     )}
 
                     {getProviderConfig(selectedProvider).needsGroqKey && (
                       <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                        <label className="block text-xs font-medium text-foreground mb-1">
                           Groq API Key (optional if set in env)
                         </label>
                         <input
@@ -317,7 +317,7 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                           value={groqApiKey}
                           onChange={(e) => setGroqApiKey(e.target.value)}
                           placeholder={getProviderConfig(selectedProvider).placeholder}
-                          className="w-full px-2 py-1 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-xs"
+                          className="w-full px-2 py-1 border border-border rounded-md focus:ring-2 focus:ring-ring focus:border-transparent text-xs bg-background text-foreground"
                         />
                       </div>
                     )}
@@ -329,7 +329,7 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                   <button
                     onClick={switchLLM}
                     disabled={switching || !selectedProvider || !selectedModel}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-xs"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors text-xs"
                   >
                     {switching ? (
                       <RefreshCw className="w-3 h-3 animate-spin" />
@@ -342,7 +342,7 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                   <button
                     onClick={testLLM}
                     disabled={testing}
-                    className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-xs"
+                    className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors text-xs"
                   >
                     {testing ? (
                       <RefreshCw className="w-3 h-3 animate-spin" />
@@ -356,8 +356,8 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                 {lastSwitchResult && (
                   <div className={`p-2 rounded-md ${
                     lastSwitchResult.status === 'success' 
-                      ? 'bg-green-50 text-green-800 border border-green-200' 
-                      : 'bg-red-50 text-red-800 border border-red-200'
+                      ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' 
+                      : 'bg-destructive/10 text-destructive border border-destructive/20'
                   }`}>
                     <div className="text-xs">
                       {lastSwitchResult.message}
@@ -366,7 +366,7 @@ const LLMSelector: React.FC<LLMSelectorProps> = ({ className = "", compact = fal
                 )}
               </div>
             ) : (
-              <div className="text-center py-6 text-gray-500 text-xs">
+              <div className="text-center py-6 text-muted-foreground text-xs">
                 Failed to load configuration
               </div>
             )}

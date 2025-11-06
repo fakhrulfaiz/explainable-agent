@@ -73,7 +73,7 @@ const Test: React.FC = () => {
   };
 
   return (
-    <div className="h-screen flex bg-gray-50 dark:bg-neutral-800 overflow-hidden">
+    <div className="h-screen flex bg-background overflow-hidden">
       {/* TestSidebar */}
       <TestSidebar
         selectedThreadId={selectedThreadId}
@@ -85,21 +85,21 @@ const Test: React.FC = () => {
       {/* Main Content */}
       <div className={`flex-1 overflow-y-auto p-8 transition-all duration-300 ${isSidebarExpanded ? 'ml-64' : 'ml-12'}`}>
       <div className="max-w-5xl mx-auto w-full space-y-8">
-        <div className="bg-white dark:bg-neutral-700 rounded-lg shadow-md p-6">
-          <h1 className="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">
+        <div className="bg-card rounded-lg shadow-md p-6">
+          <h1 className="text-2xl font-bold mb-4 text-card-foreground">
             Component Testing Page
           </h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
+          <p className="text-muted-foreground mb-6">
             This page is for testing components in isolation.
           </p>
         </div>
 
         {/* ToolCallMessage Test Section */}
-        <div className="bg-white dark:bg-neutral-700 rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">
+        <div className="bg-card rounded-lg shadow-md p-6">
+          <h2 className="text-xl font-semibold mb-4 text-card-foreground">
             ToolCallMessage Component
           </h2>
-          <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+          <div className="border border-border rounded-lg p-4">
             <ToolCallMessage 
               toolCalls={mockToolCalls}
               content={"I'm about to run a couple of tools to fetch results and compute values.\n\n- First I'll search for resources related to React hooks.\n- Then I'll evaluate a simple calculation to confirm the math."}
@@ -108,11 +108,11 @@ const Test: React.FC = () => {
         </div>
 
         {/* InputForm Test Section */}
-        <div className="bg-white dark:bg-neutral-700 rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">
+        <div className="bg-card rounded-lg shadow-md p-6">
+          <h2 className="text-xl font-semibold mb-4 text-card-foreground">
             InputForm Component
           </h2>
-          <div className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+          <div className="border border-border rounded-lg p-4">
             <InputForm
               value={inputValue}
               onChange={setInputValue}
@@ -130,7 +130,7 @@ const Test: React.FC = () => {
             />
             </div>
           <LoadingIndicator />
-          <div className="mt-4 text-sm text-gray-600 dark:text-gray-400">
+          <div className="mt-4 text-sm text-muted-foreground">
             <p>Planning: {usePlanning ? 'Enabled' : 'Disabled'}</p>
             <p>Explainer: {useExplainer ? 'Enabled' : 'Disabled'}</p>
             <p>Attached Files: {attachedFiles.length}</p>

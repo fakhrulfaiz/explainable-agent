@@ -117,17 +117,17 @@ const InputForm: React.FC<InputFormProps> = ({
       {attachedFiles.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {attachedFiles.map((file, index) => (
-            <div key={index} className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-full text-xs border border-blue-200 dark:border-blue-800">
+            <div key={index} className="flex items-center gap-2 px-3 py-1.5 bg-accent text-accent-foreground rounded-full text-xs border border-border">
               <div className="flex items-center gap-1.5">
                 {getFileIcon(file)}
                 <div className="flex flex-col">
                   <span className="truncate max-w-32 font-medium">{file.name}</span>
-                  <span className="text-[10px] text-blue-500 dark:text-blue-400">{formatFileSize(file.size)}</span>
+                  <span className="text-[10px] text-muted-foreground">{formatFileSize(file.size)}</span>
                 </div>
               </div>
               <button
                 onClick={() => removeFile(index)}
-                className="text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-200 p-0.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+                className="text-accent-foreground hover:bg-accent p-0.5 rounded-full transition-colors"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -137,10 +137,10 @@ const InputForm: React.FC<InputFormProps> = ({
       )}
 
       {/* Input Group */}
-      <InputGroup className="rounded-3xl px-2 bg-gray-50 dark:bg-neutral-700">
+      <InputGroup className="rounded-3xl px-2 bg-muted">
         <InputGroupTextarea 
           ref={textareaRef}
-          className={`rounded-3xl resize-none mt-1 max-h-64 min-h-[5rem] textarea-scroll ${
+          className={`rounded-3xl resize-none mt-1 max-h-64 min-h-[5rem] textarea-scroll bg-transparent text-foreground placeholder:text-muted-foreground ${
             isTextareaExpanded ? 'overflow-y-auto' : 'overflow-y-hidden'
           }`}
           placeholder={placeholder}
@@ -207,7 +207,7 @@ const InputForm: React.FC<InputFormProps> = ({
           {/* LLM Selector */}
           <LLMSelector compact />
 
-          <InputGroupText className="ml-auto">52% used</InputGroupText>
+          <InputGroupText className="ml-auto text-muted-foreground">52% used</InputGroupText>
           
           <Separator orientation="vertical" className="!h-4" />
           
@@ -219,7 +219,7 @@ const InputForm: React.FC<InputFormProps> = ({
             disabled={!value.trim() || disabled || isLoading}
             onClick={onSend}
           >
-            <ArrowUp className="w-5 h-5 text-neutral-700" strokeWidth={3} />
+            <ArrowUp className="w-5 h-5 text-foreground" strokeWidth={3} />
             <span className="sr-only">Send</span>
           </InputGroupButton>
         </InputGroupAddon>

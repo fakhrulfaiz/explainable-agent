@@ -19,24 +19,24 @@ const EphemeralToolIndicator: React.FC<{
   }> 
 }> = ({ steps }) => {
   return (
-    <div className="bg-gray-50 dark:bg-gray-800 border-l-4 border-gray-300 dark:border-gray-600 p-3 mb-2 rounded-r-lg">
+    <div className="bg-muted border-l-4 border-border p-3 mb-2 rounded-r-lg">
       <div className="space-y-2">
         {steps.map((step, index) => (
           <div key={step.id} className="flex items-center gap-2 text-sm">
             {step.status === 'completed' ? (
-              <div className="w-3 h-3 bg-gray-800 dark:bg-gray-200 rounded-full flex-shrink-0 flex items-center justify-center">
-                <span className="text-white dark:text-gray-800 text-xs">✓</span>
+              <div className="w-3 h-3 bg-foreground rounded-full flex-shrink-0 flex items-center justify-center">
+                <span className="text-background text-xs">✓</span>
               </div>
             ) : (
-              <div className="w-3 h-3 border-2 border-gray-600 dark:border-gray-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <div className="w-3 h-3 border-2 border-foreground border-t-transparent rounded-full animate-spin flex-shrink-0" />
             )}
-            <span className={`font-medium ${step.status === 'completed' ? 'text-gray-800 dark:text-gray-200' : 'text-gray-700 dark:text-gray-300'}`}>
+            <span className={`font-medium ${step.status === 'completed' ? 'text-foreground' : 'text-muted-foreground'}`}>
               {step.status === 'completed' 
                 ? `Step ${index + 1}: ${step.name || 'Unknown Tool'} (completed)` 
                 : `Step ${index + 1}: ${step.name || 'Unknown Tool'}...`
               }
             </span>
-            <span className={`text-xs ${step.status === 'completed' ? 'text-gray-600 dark:text-gray-400' : 'text-gray-500 dark:text-gray-500'}`}>
+            <span className={`text-xs ${step.status === 'completed' ? 'text-muted-foreground' : 'text-muted-foreground'}`}>
               {step.status === 'completed' 
                 ? `${Math.max(1, Math.floor((step.endTime! - step.startTime) / 1000))}s`
                 : `${Math.floor((Date.now() - step.startTime) / 1000)}s`
@@ -1069,7 +1069,7 @@ const updateMessageCallback = useCallback(
            {/* Mobile: Full-width background with gradient bottom */}
            <div className={`md:hidden fixed top-0 left-0 right-0 z-30 transition-[left] duration-300 ease-in-out`}>
              {/* Main background */}
-             <div className="bg-white dark:bg-neutral-800 py-3 pr-4 pl-14">
+             <div className="bg-background py-3 pr-4 pl-14">
                <ThreadTitle 
                  title={threadTitle}
                  threadId={currentThreadId || undefined}
@@ -1077,13 +1077,13 @@ const updateMessageCallback = useCallback(
                />
              </div>
              {/* Very sharp gradient fade at bottom */}
-             <div className="h-3 bg-gradient-to-b from-white dark:from-neutral-800 via-white/20 dark:via-neutral-800/20 to-transparent"></div>
+             <div className="h-3 bg-gradient-to-b from-background via-background/20 to-transparent"></div>
            </div>
 
           {/* Desktop: Background with gradient bottom */}
          <div className={`hidden md:block fixed top-0 left-0 right-0 z-30 transition-[left] duration-300 ease-in-out`}>
             {/* Main background */}
-            <div className={`bg-white dark:bg-neutral-800 py-3 pr-4 ${sidebarExpanded ? 'pl-84' : 'pl-16'} transition-[padding-left] duration-300 ease-in-out`}>
+            <div className={`bg-background py-3 pr-4 ${sidebarExpanded ? 'pl-84' : 'pl-16'} transition-[padding-left] duration-300 ease-in-out`}>
               <ThreadTitle 
                 title={threadTitle}
                 threadId={currentThreadId || undefined}
@@ -1091,7 +1091,7 @@ const updateMessageCallback = useCallback(
               />
             </div>
             {/* Very sharp gradient fade at bottom */}
-            <div className="h-3 bg-gradient-to-b from-white dark:from-neutral-800 via-white/20 dark:via-neutral-800/20 to-transparent"></div>
+            <div className="h-3 bg-gradient-to-b from-background via-background/20 to-transparent"></div>
           </div>
         </>
       )}
@@ -1158,7 +1158,7 @@ const updateMessageCallback = useCallback(
        
         <div className={`${messages.length === 0 ? 'max-w-4xl px-6' : 'max-w-3xl px-4'} min-w-[320px] w-full mx-auto`}>
           {messages.length === 0 && (
-            <div className="hidden md:block mb-5 text-center text-gray-500 dark:text-gray-400">
+            <div className="hidden md:block mb-5 text-center text-muted-foreground">
               <span className="text-3xl">Hi User! Start a conversation</span>
             </div>
           )}

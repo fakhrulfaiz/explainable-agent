@@ -86,7 +86,7 @@ export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, con
         <AccordionItem
           key={call.id}
           value={call.id}
-          className="border border-gray-200 dark:border-neutral-700 !border-b rounded-lg px-3 bg-white dark:bg-neutral-800 shadow-sm"
+          className="border border-border !border-b rounded-lg px-3 bg-background shadow-sm"
         >
             <AccordionTrigger className="hover:no-underline py-2.5">
               <div className="flex items-center gap-3 w-full">
@@ -94,10 +94,10 @@ export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, con
                   {getStatusIcon(call.status)}
                 </div>
                 <div className="flex-1 text-left">
-                  <div className="font-semibold text-gray-900 dark:text-gray-100">
+                  <div className="font-semibold text-foreground">
                     Call: {call.name}
                   </div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">
+                  <div className="text-sm text-muted-foreground capitalize">
                     {call.status}
                   </div>
                 </div>
@@ -107,10 +107,10 @@ export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, con
             <AccordionContent className="pb-2">
               <div className="space-y-3 pt-1.5">
                 <div>
-                  <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-1.5">
+                  <h3 className="font-semibold text-sm text-muted-foreground mb-1.5">
                     Input:
                   </h3>
-                  <div className="bg-slate-800 dark:bg-neutral-900 text-slate-50 dark:text-neutral-100 p-2 rounded text-sm overflow-x-auto prose prose-sm dark:prose-invert max-w-none">
+                  <div className="bg-background border border-border text-foreground p-2 rounded text-sm overflow-x-auto prose prose-sm dark:prose-invert max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {formatContent(call.input)}
                     </ReactMarkdown>
@@ -119,15 +119,15 @@ export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, con
 
                 {call.output && (
                   <div>
-                    <h3 className="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-1.5">
+                    <h3 className="font-semibold text-sm text-muted-foreground mb-1.5">
                       Output:
                     </h3>
                     <div className={`p-2 rounded text-sm overflow-x-auto prose prose-sm dark:prose-invert max-w-none ${
                       call.status === 'approved' 
-                        ? 'bg-green-50 dark:bg-green-900/20 text-green-900 dark:text-green-100' 
+                        ? 'bg-accent text-accent-foreground' 
                         : call.status === 'rejected'
-                        ? 'bg-red-50 dark:bg-red-900/20 text-red-900 dark:text-red-100'
-                        : 'bg-slate-800 dark:bg-neutral-900 text-slate-50 dark:text-neutral-100'
+                        ? 'bg-destructive/15 text-destructive'
+                        : 'bg-background border border-border text-foreground'
                     }`}>
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {formatContent(call.output)}

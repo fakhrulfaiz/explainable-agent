@@ -27,13 +27,13 @@ export const VisualizationMessage: React.FC<VisualizationMessageProps> = ({
   return (
     <div 
       onClick={onOpenVisualization}
-      className="border border-gray-200 dark:border-neutral-700 rounded-lg p-4 bg-white dark:bg-neutral-800 hover:bg-gray-50 dark:hover:bg-neutral-700 cursor-pointer transition-colors"
+      className="border border-border rounded-lg p-4 bg-background hover:bg-accent cursor-pointer transition-colors"
     >
-      <div className="font-medium text-gray-900 dark:text-white mb-2">
-        <span className="text-purple-600 dark:text-purple-400 text-sm font-normal">Visualization: </span>
+      <div className="font-medium text-foreground mb-2">
+        <span className="text-primary text-sm font-normal">Visualization: </span>
         {getTitle()}
       </div>
-      <div className="text-sm text-gray-500 dark:text-neutral-400">
+      <div className="text-sm text-muted-foreground">
         {getSummary()}
       </div>
     </div>

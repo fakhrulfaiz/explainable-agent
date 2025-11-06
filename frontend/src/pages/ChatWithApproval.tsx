@@ -888,12 +888,12 @@ const ChatWithApproval: React.FC = () => {
 
           <div className="text-center">
             {state.currentThreadId || selectedChatThreadId && (
-              <span className="text-xs text-gray-500 mr-4">
+              <span className="text-xs text-muted-foreground mr-4">
                 Graph Thread: {state.currentThreadId || selectedChatThreadId}
               </span>
             )}
             {loadingThread && (
-              <span className="text-xs text-blue-600 mr-4">
+              <span className="text-xs text-primary mr-4">
                 Loading thread...
               </span>
             )}

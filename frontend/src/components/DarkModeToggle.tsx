@@ -50,11 +50,8 @@ const DarkModeToggle: React.FC<DarkModeToggleProps> = ({
         rounded-lg
         transition-all duration-200
         hover:scale-105
-        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2
-        ${isDarkMode 
-          ? 'bg-gray-700 text-yellow-400 hover:bg-gray-600' 
-          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-        }
+        focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2
+        bg-muted text-foreground hover:bg-accent
         ${className}
       `}
       aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
