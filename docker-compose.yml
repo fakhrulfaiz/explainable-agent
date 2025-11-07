@@ -41,8 +41,8 @@ services:
       # Anonymous volume for node_modules to avoid conflicts with host
       - /app/node_modules
     environment:
-      # - VITE_API_URL=http://localhost/api
-      - VITE_API_URL=https://alisa-creedless-colene.ngrok-free.dev/api
+      - VITE_API_URL=http://localhost/api
+      # - VITE_API_URL=https://alisa-creedless-colene.ngrok-free.dev/api
       - VITE_DEV_MODE=true
     depends_on:
       - backend

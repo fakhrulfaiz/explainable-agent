@@ -219,7 +219,7 @@ const InputForm: React.FC<InputFormProps> = ({
             disabled={!value.trim() || disabled || isLoading}
             onClick={onSend}
           >
-            <ArrowUp className="w-5 h-5 text-foreground" strokeWidth={3} />
+            <ArrowUp className="w-5 h-5 text-background" strokeWidth={3} />
             <span className="sr-only">Send</span>
           </InputGroupButton>
         </InputGroupAddon>

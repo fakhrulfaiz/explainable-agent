@@ -5,6 +5,7 @@ import PieChartVisualizer, { PieChartSpec } from '../visualizers/PieChartVisuali
 import LineChartVisualizer, { LineChartSpec } from '../visualizers/LineChartVisualizer';
 import { Download } from 'lucide-react';
 import { useUIState } from '../../contexts/UIStateContext';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 
 type VisualizationPanelProps = {
 	open: boolean;
@@ -71,6 +72,10 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ open, onClose, 
 			window.removeEventListener('resize', handleWindowResize);
 		};
 	}, [onMouseMove, onMouseUp, handleWindowResize]);
+
+	const getChartTypeLabel = (type: string) => {
+		return type.charAt(0).toUpperCase() + type.slice(1);
+	};
 
 	const handleDownload = async () => {
 		const activeChart = chartsArray[selectedChartIndex];
@@ -158,21 +163,30 @@ const VisualizationPanel: React.FC<VisualizationPanelProps> = ({ open, onClose, 
 						{chartsArray.length > 1 && (
 							<div className="bg-gray-50 dark:bg-neutral-800 rounded-lg p-6 border border-gray-200 dark:border-neutral-700 shadow-sm">
 								<h2 className="text-xl font-semibold text-gray-600 dark:text-neutral-300 mb-4">Select Chart</h2>
-								<div className="flex gap-3 flex-wrap">
-									{chartsArray.map((chart, idx) => (
-										<button
-											key={idx}
-											onClick={() => setSelectedChartIndex(idx)}
-											className={`px-4 py-2 rounded-lg font-medium transition-colors border ${
-												selectedChartIndex === idx
-													? 'bg-blue-600 text-white border-blue-600'
-													: 'bg-white dark:bg-neutral-900 text-gray-400 dark:text-neutral-300 border-gray-300 dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800'
-											}`}
-										>
-											{chart.title || `Chart ${idx + 1}`}
-										</button>
-									))}
-								</div>
+								<Select
+									value={selectedChartIndex.toString()}
+									onValueChange={(value: string) => setSelectedChartIndex(parseInt(value, 10))}
+								>
+									<SelectTrigger className="w-full max-w-md bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700 text-gray-900 dark:text-white">
+										<SelectValue placeholder="Select a chart" />
+									</SelectTrigger>
+									<SelectContent className="bg-white dark:bg-neutral-900 border-gray-300 dark:border-neutral-700">
+										{chartsArray.map((chart, idx) => (
+											<SelectItem
+												key={idx}
+												value={idx.toString()}
+												className="text-gray-900 dark:text-white focus:bg-gray-100 dark:focus:bg-neutral-800"
+											>
+												<span className="flex items-center justify-between w-full">
+													<span className="flex-1">{chart.title || `Chart ${idx + 1}`}</span>
+													<span className="ml-3 text-xs text-gray-500 dark:text-neutral-400 font-medium uppercase">
+														{getChartTypeLabel(chart.type)}
+													</span>
+												</span>
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 							</div>
 						)}
 						{(() => {
