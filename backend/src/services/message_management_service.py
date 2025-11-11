@@ -28,7 +28,9 @@ class MessageManagementService:
                                content: str,
                                message_id: Optional[int] = None,
                                message_type: Literal["message", "explorer", "visualization"] = "message",
-                               metadata: Optional[dict] = None) -> ChatMessage:
+                               metadata: Optional[dict] = None,
+                               user_id: Optional[str] = None,
+                               is_feedback: bool = False) -> ChatMessage:
         """
         Save a user message with proper validation and security checks.
         This is called when the backend receives a user message.
@@ -40,6 +42,10 @@ class MessageManagementService:
             
             if not thread:
                 raise ValueError(f"Thread {thread_id} not found")
+            
+            # Get user_id from thread if not provided
+            if user_id is None:
+                user_id = getattr(thread, 'user_id', None)
             
             # Generate message ID if not provided
             if message_id is None:
@@ -59,17 +65,21 @@ class MessageManagementService:
                 timestamp=datetime.now(),
                 message_type=message_type,
                 message_id=message_id,
+                user_id=user_id,  # Include user_id
                 # User messages don't need approval by default
                 needs_approval=False,
                 approved=None,
                 disapproved=None,
                 is_error=False,
-                is_feedback=False,
+                is_feedback=is_feedback,  # Set based on parameter
                 has_timed_out=False,
                 can_retry=False,
                 retry_action=None,
                 checkpoint_id=None
             )
+            
+            if user_id:
+                logger.info(f"Saving user message {message_id} to thread {thread_id} with user_id: {user_id}")
             
             # Save to database
             success = await self.messages_repo.add_message(message)
@@ -90,7 +100,8 @@ class MessageManagementService:
                                    checkpoint_id: Optional[str] = None,
                                    needs_approval: bool = False,
                                    metadata: Optional[dict] = None,
-                                   message_id: Optional[int] = None) -> ChatMessage:
+                                   message_id: Optional[int] = None,
+                                   user_id: Optional[str] = None) -> ChatMessage:
         """
         Save an assistant message. This is called by the backend during graph execution.
         Only the backend should create assistant messages for security.
@@ -98,6 +109,15 @@ class MessageManagementService:
         try:
             # For assistant messages, we trust the backend - thread should exist since 
             # assistant messages are only created during active graph execution
+            
+            # Get user_id from thread if not provided
+            if user_id is None:
+                try:
+                    thread = await self.chat_thread_repo.find_by_id(thread_id, "thread_id")
+                    if thread:
+                        user_id = getattr(thread, 'user_id', None)
+                except Exception:
+                    pass  # Thread might not exist yet, user_id will be None
             
             # Generate unique message ID only if not provided
             if message_id is None:
@@ -114,6 +134,7 @@ class MessageManagementService:
                 timestamp=datetime.now(),
                 message_type=message_type,
                 message_id=message_id,
+                user_id=user_id,  # Include user_id
                 checkpoint_id=checkpoint_id,
                 needs_approval=needs_approval,
                 approved=None,
@@ -125,6 +146,9 @@ class MessageManagementService:
                 retry_action="approve" if needs_approval else None,
                 metadata=metadata
             )
+            
+            if user_id:
+                logger.info(f"Saving assistant message {message_id} to thread {thread_id} with user_id: {user_id}")
             
             # Save to database
             success = await self.messages_repo.add_message(message)

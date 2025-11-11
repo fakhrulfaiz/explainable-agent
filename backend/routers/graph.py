@@ -3,18 +3,22 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from uuid import uuid4
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Optional
 import logging
 import json
 import asyncio
+from dataclasses import dataclass
 from src.models.schemas import StartRequest, GraphResponse, GraphStatusResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
-from src.services.explainable_agent2 import ExplainableAgent, ExplainableAgentState
+from src.services.explainable_agent import ExplainableAgent, ExplainableAgentState
 from langchain_core.messages import HumanMessage
 from src.models.database import get_mongo_memory, get_mongodb
-from src.repositories.dependencies import get_message_management_service
+from src.repositories.dependencies import get_message_management_service, get_chat_history_service
 from src.services.message_management_service import MessageManagementService
+from src.services.chat_history_service import ChatHistoryService
 from src.utils.approval_utils import clear_previous_approvals
+from src.middleware.auth import get_current_user
+from src.models.supabase_user import SupabaseUser
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +32,27 @@ def get_explainable_agent(request: Request) -> ExplainableAgent:
     return request.app.state.explainable_agent
 
 
-async def run_graph_and_response(explainable_agent: ExplainableAgent, input_state, config, message_service: MessageManagementService = None):
+@dataclass
+class UserContext:
+    """Context for user identification"""
+    user_id: str
+
+
+async def run_graph_and_response(
+    explainable_agent: ExplainableAgent, 
+    input_state, 
+    config, 
+    message_service: MessageManagementService = None,
+    user_id: Optional[str] = None
+):
     logger = logging.getLogger(__name__)
     thread_id = config.get("configurable", {}).get("thread_id", "unknown")
+    
+    # Add user_id to config if available (for tools to access via runtime context)
+    if user_id:
+        if "configurable" not in config:
+            config["configurable"] = {}
+        config["configurable"]["user_id"] = user_id
     
     # Initialize query variable with default value to avoid scoping issues
     query = ""
@@ -82,7 +104,8 @@ async def run_graph_and_response(explainable_agent: ExplainableAgent, input_stat
                         content=assistant_response,
                         message_type="message",
                         checkpoint_id=checkpoint_id,
-                        needs_approval=True  # This message needs approval
+                        needs_approval=True,  # This message needs approval
+                        user_id=user_id  # Pass user_id
                     )
                     assistant_message_id = saved_message.message_id
                     logger.info(f"Saved assistant message {assistant_message_id} for approval in thread {thread_id}")
@@ -162,7 +185,8 @@ async def run_graph_and_response(explainable_agent: ExplainableAgent, input_stat
                             content=assistant_response,
                             message_type="message",
                             checkpoint_id=checkpoint_id,
-                            needs_approval=False
+                            needs_approval=False,
+                            user_id=user_id  # Pass user_id
                         )
                         assistant_message_id = saved_message.message_id
                         logger.info(f"Saved assistant message {assistant_message_id} for thread {thread_id}")
@@ -178,7 +202,8 @@ async def run_graph_and_response(explainable_agent: ExplainableAgent, input_stat
                             content=explorer_content,
                             message_type="explorer",
                             checkpoint_id=checkpoint_id,
-                            needs_approval=False
+                            needs_approval=False,
+                            user_id=user_id  # Pass user_id
                         )
                         explorer_message_id = explorer_message.message_id
                         logger.info(f"Saved explorer message {explorer_message_id} for thread {thread_id}")
@@ -193,7 +218,8 @@ async def run_graph_and_response(explainable_agent: ExplainableAgent, input_stat
                             content=viz_content,
                             message_type="visualization",
                             checkpoint_id=checkpoint_id,
-                            needs_approval=False
+                            needs_approval=False,
+                            user_id=user_id  # Pass user_id
                         )
                         visualization_message_id = viz_message.message_id
                         logger.info(f"Saved visualization message {visualization_message_id} for thread {thread_id}")
@@ -254,15 +280,30 @@ def _normalize_visualizations(visualizations: Any) -> List[Dict[str, Any]]:
 async def start_graph(
     request: StartRequest,
     agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)],
-    message_service: Annotated[MessageManagementService, Depends(get_message_management_service)]
+    message_service: Annotated[MessageManagementService, Depends(get_message_management_service)],
+    current_user: SupabaseUser = Depends(get_current_user)
 ):
     try:
         # Use provided thread_id or generate new one
         thread_id = request.thread_id or str(uuid4())
         config = {"configurable": {"thread_id": thread_id}}
         
-        # Note: User message is saved by frontend when creating thread
-        # Only save user messages for existing threads (like feedback in /resume)
+        # Get user_id from authenticated user (required)
+        user_id = current_user.user_id
+        
+        # Save user message to database before creating initial state
+        # Note: For first message, this may duplicate the save from thread creation, but ensures consistency
+        if message_service and request.human_request:
+            try:
+                saved_message = await message_service.save_user_message(
+                    thread_id=thread_id,
+                    content=request.human_request,
+                    user_id=user_id
+                )
+                logger.info(f"Saved user message {saved_message.message_id} for thread {thread_id}")
+            except Exception as e:
+                # Log error but don't fail the request - message saving is important but shouldn't block execution
+                logger.error(f"Failed to save user message for thread {thread_id}: {e}")
         
         initial_state = ExplainableAgentState(
             messages=[HumanMessage(content=request.human_request)],
@@ -279,8 +320,9 @@ async def start_graph(
             visualizations=[]
         )
         
+        logger.info(f"Starting graph with user_id: {user_id}")
         
-        return await run_graph_and_response(agent, initial_state, config, message_service)
+        return await run_graph_and_response(agent, initial_state, config, message_service, user_id)
     except Exception as e:
         return GraphResponse(
             thread_id=thread_id if 'thread_id' in locals() else "unknown",
@@ -293,12 +335,14 @@ async def start_graph(
 async def resume_graph(
     request: ResumeRequest,
     agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)],
-    message_service: Annotated[MessageManagementService, Depends(get_message_management_service)]
+    message_service: Annotated[MessageManagementService, Depends(get_message_management_service)],
+    current_user: SupabaseUser = Depends(get_current_user)
 ):
     logger = logging.getLogger(__name__)
     config = {"configurable": {"thread_id": request.thread_id}}
     
-    logger.info(f"Resuming graph for thread_id: {request.thread_id}, action: {request.review_action}")
+    user_id = current_user.user_id
+    logger.info(f"Resuming graph with user_id: {user_id} for thread_id: {request.thread_id}, action: {request.review_action}")
     
     try:
         # Get current state
@@ -326,7 +370,9 @@ async def resume_graph(
             try:
                 saved_feedback = await message_service.save_user_message(
                     thread_id=request.thread_id,
-                    content=request.human_comment
+                    content=request.human_comment,
+                    user_id=user_id,  # Pass user_id
+                    is_feedback=True  # Mark as feedback directly
                 )
                 logger.info(f"Saved user feedback message {saved_feedback.message_id} for thread {request.thread_id}")
             except Exception as e:
@@ -343,7 +389,7 @@ async def resume_graph(
         agent.graph.update_state(config, state_update)
         
         # Continue execution
-        return await run_graph_and_response(agent, None, config, message_service)
+        return await run_graph_and_response(agent, None, config, message_service, user_id)
         
     except Exception as e:
         error_message = str(e) if e else "Unknown error occurred"
@@ -392,15 +438,26 @@ def get_graph_status(
 
 
 @router.get("/state/{thread_id}/agent")
-def get_agent_state_via_agent(
+async def get_agent_state_via_agent(
     thread_id: str,
-    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
+    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)],
+    current_user: SupabaseUser = Depends(get_current_user),
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
 ):
     """
     Fetch the agent's current state via the compiled graph.
     If thread exists in MongoDB but not loaded in agent, it will load it first.
     """
-    config = {"configurable": {"thread_id": thread_id}}
+    user_id = current_user.user_id
+    
+    # Verify thread ownership before accessing state
+    thread = await chat_service.get_thread(thread_id, user_id=user_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found or access denied")
+    
+    config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+    logger.info(f"Getting agent state for thread_id: {thread_id} with user_id: {user_id}")
+    
     try:
         # Try to get current state from agent
         state = agent.graph.get_state(config)
@@ -455,15 +512,25 @@ def get_agent_state_via_agent(
 
 
 @router.post("/state/{thread_id}/restore")
-def restore_agent_state(
+async def restore_agent_state(
     thread_id: str,
-    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)]
+    agent: Annotated[ExplainableAgent, Depends(get_explainable_agent)],
+    current_user: SupabaseUser = Depends(get_current_user),
+    chat_service: ChatHistoryService = Depends(get_chat_history_service)
 ):
     """
     Explicitly restore/load a thread's state from MongoDB checkpointer into the agent.
     Useful after server restart to ensure the agent has the latest state.
     """
-    config = {"configurable": {"thread_id": thread_id}}
+    user_id = current_user.user_id
+    
+    # Verify thread ownership before restoring state
+    thread = await chat_service.get_thread(thread_id, user_id=user_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found or access denied")
+    
+    config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+    logger.info(f"Restoring state for thread_id: {thread_id} with user_id: {user_id}")
     try:
         # Force load from checkpointer by getting state
         state = agent.graph.get_state(config)

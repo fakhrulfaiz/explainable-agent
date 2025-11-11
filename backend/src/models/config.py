@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     langsmith_project: str = "default"
     langsmith_endpoint: str = "https://api.smith.langchain.com"
     
+    # Supabase Configuration
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+    supabase_jwt_secret: str = ""
+
     # Database Configuration
     database_path: str = "src/resource/chinook.db"
     

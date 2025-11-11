@@ -11,12 +11,13 @@ import time as _time
 
 from src.models.schemas import StartRequest, GraphResponse, ResumeRequest
 from src.models.status_enums import ExecutionStatus, ApprovalStatus
-from src.services.explainable_agent2 import ExplainableAgent
+from src.services.explainable_agent import ExplainableAgent, ExplainableAgentState
 from langchain_core.messages import HumanMessage
-from src.services.explainable_agent2 import ExplainableAgentState
 from src.repositories.dependencies import get_message_management_service
 from src.services.message_management_service import MessageManagementService
 from src.utils.approval_utils import clear_previous_approvals
+from src.middleware.auth import get_current_user
+from src.models.supabase_user import SupabaseUser
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +61,23 @@ def _extract_stream_or_message_id(msg: Any, preferred_key: str = 'message_id') -
     return msg_id
 
 @router.post("/start", response_model=GraphResponse)
-def create_graph_streaming(request: StartRequest):
+async def create_graph_streaming(
+    request: StartRequest,
+    current_user: SupabaseUser = Depends(get_current_user)
+):
     thread_id = request.thread_id or str(uuid4())
+    
+    # Extract user_id from authenticated user
+    user_id = current_user.user_id
+    logger.info(f"Streaming graph /start - thread_id: {thread_id}, user_id: {user_id}")
     
     run_configs[thread_id] = {
         "type": "start",
         "human_request": request.human_request,
         "use_planning": request.use_planning,
         "use_explainer": request.use_explainer,
-        "agent_type": request.agent_type
+        "agent_type": request.agent_type,
+        "user_id": user_id  # Store user_id for later use
     }
     
     
@@ -85,13 +94,21 @@ def create_graph_streaming(request: StartRequest):
     )
 
 @router.post("/resume", response_model=GraphResponse)
-def resume_graph_streaming(request: ResumeRequest):
+async def resume_graph_streaming(
+    request: ResumeRequest,
+    current_user: SupabaseUser = Depends(get_current_user)
+):
     thread_id = request.thread_id
+    
+    # Extract user_id from authenticated user
+    user_id = current_user.user_id
+    logger.info(f"Streaming graph /resume - thread_id: {thread_id}, user_id: {user_id}")
     
     run_configs[thread_id] = {
         "type": "resume",
         "review_action": request.review_action,
-        "human_comment": request.human_comment
+        "human_comment": request.human_comment,
+        "user_id": user_id  # Store user_id for later use
     }
     
     return GraphResponse(
@@ -110,13 +127,34 @@ async def stream_graph(request: Request, thread_id: str,
     
     # Get the stored configuration
     run_data = run_configs[thread_id]
-    config = {"configurable": {"thread_id": thread_id}}
+    
+    # Extract user_id from stored config (required - should be set in /start or /resume)
+    user_id = run_data.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found. Authentication required.")
+    
+    logger.info(f"Streaming graph execution - thread_id: {thread_id}, user_id: {user_id}")
+    
+    config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
+    logger.info(f"Added user_id to config for thread_id: {thread_id}, user_id: {user_id}")
     
     input_state = None
     if run_data["type"] == "start":
         event_type = "start"
         use_planning_value = run_data.get("use_planning", True)
         
+        # Save user message to database before creating initial state
+        if message_service and run_data.get("human_request"):
+            try:
+                saved_message = await message_service.save_user_message(
+                    thread_id=thread_id,
+                    content=run_data["human_request"],
+                    user_id=user_id
+                )
+                logger.info(f"Saved user message {saved_message.message_id} for thread {thread_id}")
+            except Exception as e:
+                # Log error but don't fail the request - message saving is important but shouldn't block execution
+                logger.error(f"Failed to save user message for thread {thread_id}: {e}")
         
         initial_state = ExplainableAgentState(
             messages=[HumanMessage(content=run_data["human_request"])],
@@ -135,18 +173,20 @@ async def stream_graph(request: Request, thread_id: str,
         event_type = "resume"
         
         # Save user feedback message to database
-        print(f"Feedback debug - message_service: {message_service is not None}, human_comment: '{run_data.get('human_comment')}'")
+        logger.info(f"Feedback debug - message_service: {message_service is not None}, human_comment: '{run_data.get('human_comment')}'")
         if message_service and run_data.get("human_comment"):
             try:
                 saved_feedback = await message_service.save_user_message(
                     thread_id=thread_id,
-                    content=run_data["human_comment"]
+                    content=run_data["human_comment"],
+                    user_id=user_id,  # Pass user_id
+                    is_feedback=True  # Mark as feedback directly
                 )
-                print(f"Saved user feedback message {saved_feedback.message_id} for thread {thread_id}")
+                logger.info(f"Saved user feedback message {saved_feedback.message_id} for thread {thread_id}")
             except Exception as e:
-                print(f"Failed to save user feedback message for thread {thread_id}: {e}")
+                logger.error(f"Failed to save user feedback message for thread {thread_id}: {e}")
         else:
-            print(f"Skipping feedback save - message_service: {message_service is not None}, human_comment: '{run_data.get('human_comment')}'")
+            logger.warning(f"Skipping feedback save - message_service: {message_service is not None}, human_comment: '{run_data.get('human_comment')}'")
         
         state_update = {"status": run_data["review_action"]}
         if run_data["human_comment"] is not None:
@@ -158,6 +198,10 @@ async def stream_graph(request: Request, thread_id: str,
     async def event_generator():       
         buffer = ""
         
+        # Log config details before streaming starts
+        config_user_id = config.get('configurable', {}).get('user_id', 'NOT SET')
+        logger.info(f"Starting stream event_generator - thread_id: {thread_id}, user_id in config: {config_user_id}")
+        
         # Track tool calls to match with their results
         pending_tool_calls = {}  # {tool_call_id: {tool_name, args, node}}
         
@@ -166,6 +210,7 @@ async def stream_graph(request: Request, thread_id: str,
         yield {"event": event_type, "data": initial_data}
         
         try:
+            logger.info(f"Beginning graph.stream() for thread_id: {thread_id}, user_id: {config_user_id}")
             for msg, metadata in agent.graph.stream(input_state, config, stream_mode="messages"):
                 if await request.is_disconnected():
                     break
@@ -657,7 +702,8 @@ async def stream_graph(request: Request, thread_id: str,
                             message_type="message",
                             checkpoint_id=checkpoint_id,
                             needs_approval=True,  # This message needs approval
-                            message_id=assistant_message_id
+                            message_id=assistant_message_id,
+                            user_id=user_id  # Pass user_id
                         )
                         logger.info(f"Saved assistant message {saved_message.message_id} for approval in thread {thread_id}")
                     except Exception as e:
@@ -679,7 +725,8 @@ async def stream_graph(request: Request, thread_id: str,
                             message_type="message",
                             checkpoint_id=checkpoint_id,
                             needs_approval=False,
-                            message_id=assistant_message_id
+                            message_id=assistant_message_id,
+                            user_id=user_id  # Pass user_id
                         )
                     
                     # Save explorer message if steps exist
@@ -693,7 +740,8 @@ async def stream_graph(request: Request, thread_id: str,
                             content=explorer_content,
                             message_type="explorer",
                             checkpoint_id=checkpoint_id,
-                            needs_approval=False
+                            needs_approval=False,
+                            user_id=user_id  # Pass user_id
                         )
                     
                     # Save visualization message if visualizations exist
@@ -707,7 +755,8 @@ async def stream_graph(request: Request, thread_id: str,
                             content=viz_content,
                             message_type="visualization",
                             checkpoint_id=checkpoint_id,
-                            needs_approval=False
+                            needs_approval=False,
+                            user_id=user_id  # Pass user_id
                         )
                         
                 except Exception as e:

@@ -9,6 +9,8 @@ from src.models.chat_models import (
     CreateChatRequest,
     ChatThread
 )
+from src.middleware.auth import get_current_user
+from src.models.supabase_user import SupabaseUser
 from pydantic import BaseModel
 import logging
 
@@ -23,11 +25,14 @@ router = APIRouter(
 @router.post("/create", response_model=ChatHistoryResponse)
 async def create_chat_thread(
     request: CreateChatRequest,
-    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+    chat_service: ChatHistoryService = Depends(get_chat_history_service),
+    current_user: SupabaseUser = Depends(get_current_user)
 ):
     try:
-        logger.info(f"Creating chat thread with title: '{request.title}', initial_message: '{request.initial_message}'")
-        thread = await chat_service.create_thread(request)
+        user_id = current_user.user_id
+        logger.info(f"Creating chat thread with title: '{request.title}', user_id: {user_id}")
+        
+        thread = await chat_service.create_thread(request, user_id=user_id)
         logger.info(f"Thread created successfully: {thread.thread_id}")
         
         # Convert ChatThread to ChatThreadWithMessages by getting the full thread data
@@ -48,12 +53,16 @@ async def create_chat_thread(
 async def get_all_chat_threads(
     limit: int = Query(50, ge=1, le=100, description="Number of threads to return"),
     skip: int = Query(0, ge=0, description="Number of threads to skip"),
-    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+    chat_service: ChatHistoryService = Depends(get_chat_history_service),
+    current_user: SupabaseUser = Depends(get_current_user)
 ):
   
     try:
-        threads = await chat_service.get_all_threads_summary(limit=limit, skip=skip)
-        total = await chat_service.get_thread_count()
+        user_id = current_user.user_id
+        logger.info(f"Retrieving threads for user_id: {user_id}")
+        
+        threads = await chat_service.get_all_threads_summary(limit=limit, skip=skip, user_id=user_id)
+        total = await chat_service.get_thread_count(user_id=user_id)
         return ChatListResponse(
             success=True,
             data=threads,
@@ -68,10 +77,14 @@ async def get_all_chat_threads(
 @router.get("/thread/{thread_id}", response_model=ChatHistoryResponse)
 async def get_chat_thread(
     thread_id: str,
-    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+    chat_service: ChatHistoryService = Depends(get_chat_history_service),
+    current_user: SupabaseUser = Depends(get_current_user)
 ):
     try:
-        thread = await chat_service.get_thread(thread_id)
+        user_id = current_user.user_id
+        logger.info(f"Retrieving thread {thread_id} for user_id: {user_id}")
+        
+        thread = await chat_service.get_thread(thread_id, user_id=user_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Chat thread not found")
         
@@ -185,14 +198,18 @@ async def update_message_flags(
 @router.post("/thread/{thread_id}/restore", response_model=ChatHistoryResponse)
 async def restore_chat_thread(
     thread_id: str,
-    chat_service: ChatHistoryService = Depends(get_chat_history_service)
+    chat_service: ChatHistoryService = Depends(get_chat_history_service),
+    current_user: SupabaseUser = Depends(get_current_user)
 ):
     """
     Restore a chat thread for continuing conversation.
     This endpoint returns the full chat history that can be used to restore the conversation context.
     """
     try:
-        thread = await chat_service.get_thread(thread_id)
+        user_id = current_user.user_id
+        logger.info(f"Restoring chat thread {thread_id} with user_id: {user_id}")
+        
+        thread = await chat_service.get_thread(thread_id, user_id=user_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Chat thread not found")
         

@@ -30,7 +30,7 @@ class ChatHistoryService:
         self.messages_repo = messages_repo
     
     
-    async def create_thread(self, request: CreateChatRequest) -> ChatThread:
+    async def create_thread(self, request: CreateChatRequest, user_id: Optional[str] = None) -> ChatThread:
     
         try:
             # Generate thread_id
@@ -41,25 +41,18 @@ class ChatHistoryService:
                 thread_id=thread_id, 
                 title=request.title or "New Chat",
                 created_at=datetime.now(),
-                updated_at=datetime.now()
+                updated_at=datetime.now(),
+                user_id=user_id  # Include user_id
             )
+            
+            if user_id:
+                logger.info(f"Creating new chat thread: {thread_id} with user_id: {user_id}")
             
             # Save thread first
             success = await self.chat_thread_repo.create_thread(thread)
             if not success:
                 raise Exception("Failed to create chat thread in database")
-            
-            # Add initial message if provided (after thread is created)
-            if request.initial_message:
-                import time
-                initial_msg = ChatMessage(
-                    sender="user",
-                    content=request.initial_message,
-                    timestamp=datetime.now(),
-                    thread_id=thread.thread_id,
-                    message_id=int(time.time() * 1000000)  # Generate unique message_id
-                )
-                await self.messages_repo.add_message(initial_msg)
+        
             
             logger.info(f"Created new chat thread: {thread_id}")
             
@@ -76,9 +69,9 @@ class ChatHistoryService:
             logger.error(f"Error creating chat thread: {e}")
             raise Exception(f"Failed to create chat thread: {e}")
     
-    async def get_thread(self, thread_id: str) -> Optional[ChatThreadWithMessages]:
+    async def get_thread(self, thread_id: str, user_id: Optional[str] = None) -> Optional[ChatThreadWithMessages]:
         try:
-            thread = await self.chat_thread_repo.find_by_thread_id(thread_id)
+            thread = await self.chat_thread_repo.find_by_thread_id(thread_id, user_id=user_id)
             if not thread:
                 return None
             
@@ -88,6 +81,7 @@ class ChatHistoryService:
                 title=thread.title,
                 created_at=thread.created_at,
                 updated_at=thread.updated_at,
+                user_id=thread.user_id,
                 messages=messages
             )
         except Exception as e:
@@ -141,16 +135,16 @@ class ChatHistoryService:
             logger.error(f"Error retrieving message {message_id} from thread {thread_id}: {e}")
             raise Exception(f"Failed to retrieve message: {e}")
     
-    async def get_all_threads(self, limit: int = 50, skip: int = 0) -> List[ChatThread]:
+    async def get_all_threads(self, limit: int = 50, skip: int = 0, user_id: Optional[str] = None) -> List[ChatThread]:
         try:
-            return await self.chat_thread_repo.get_threads(limit=limit, skip=skip)
+            return await self.chat_thread_repo.get_threads(limit=limit, skip=skip, user_id=user_id)
         except Exception as e:
             logger.error(f"Error retrieving chat threads: {e}")
             raise Exception(f"Failed to retrieve chat threads: {e}")
 
-    async def get_all_threads_summary(self, limit: int = 50, skip: int = 0) -> List[ChatThreadSummary]:
+    async def get_all_threads_summary(self, limit: int = 50, skip: int = 0, user_id: Optional[str] = None) -> List[ChatThreadSummary]:
         try:
-            chat_threads = await self.chat_thread_repo.get_threads(limit=limit, skip=skip)
+            chat_threads = await self.chat_thread_repo.get_threads(limit=limit, skip=skip, user_id=user_id)
 
             thread_summaries = []
             for thread in chat_threads:
@@ -217,10 +211,10 @@ class ChatHistoryService:
             logger.error(f"Error updating thread title {thread_id}: {e}")
             raise Exception(f"Failed to update thread title: {e}")
     
-    async def get_thread_count(self) -> int:
+    async def get_thread_count(self, user_id: Optional[str] = None) -> int:
     
         try:
-            return await self.chat_thread_repo.count_threads()
+            return await self.chat_thread_repo.count_threads(user_id=user_id)
         except Exception as e:
             logger.error(f"Error counting chat threads: {e}")
             return 0

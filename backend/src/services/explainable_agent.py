@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from src.models.database import get_mongo_memory
 from src.tools.custom_toolkit import CustomToolkit
 from src.utils.chart_utils import get_supported_charts
+from src.tools.profile_tools import get_profile_tools
 try:
     from explainer import Explainer
     from nodes.planner_node import PlannerNode
@@ -45,7 +46,7 @@ class ExplainableAgentState(MessagesState):
 class ExplainableAgent:
     """Data Exploration Agent - Specialized for SQL database queries and data analysis with explanations"""
     
-    def __init__(self, llm, db_path: str, logs_dir: str = None, mongo_memory=None):
+    def __init__(self, llm, db_path: str, logs_dir: str = None, mongo_memory=None, store=None):
         self.llm = llm
         self.db_path = db_path
         self.engine = create_engine(f'sqlite:///{db_path}')
@@ -57,8 +58,11 @@ class ExplainableAgent:
         self.custom_toolkit = CustomToolkit(llm=self.llm)
         self.custom_tools = self.custom_toolkit.get_tools()
         
-        # Combine all tools
+        # Combine tools (exclude profile tools from agent exposure)
         self.tools = self.sql_tools + self.custom_tools
+        
+        # Store for long-term memory
+        self.store = store
         self.explainer = Explainer(llm)
         self.planner = PlannerNode(llm, self.tools)
         self.logs_dir = logs_dir or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
@@ -68,26 +72,38 @@ class ExplainableAgent:
         # Create handoff tools for the assistant
         self.create_handoff_tools()
         
-        # Create assistant as a react agent with transfer tools
+        # Create assistant as a react agent with transfer tools and profile tools
+        profile_tools = get_profile_tools()
         base_assistant_agent = create_react_agent(
             model=llm,
-            tools=[self.transfer_to_data_exploration],  # Add transfer_to_explainer_agent when ready
+            tools=[self.transfer_to_data_exploration] + profile_tools,  # Add transfer_to_explainer_agent when ready
             prompt=(
-                "You are an assistant that routes tasks to specialized agents.\n\n"
-                "AVAILABLE AGENTS:\n"
+                "You are an assistant that handles user preferences and routes tasks to specialized agents.\n\n"
+                "AVAILABLE TOOLS:\n"
+                "- Profile Tools: save_user_preference, update_user_name, update_communication_style, get_user_profile\n"
+                "  Use these for: Setting nicknames, communication preferences, saving any user preferences\n"
                 "- data_exploration_agent: Handles database queries and visualizations, SQL analysis, and data exploration\n"
                 "  Use this for: SQL queries, database analysis, table inspection, data queries, schema questions\n\n"
-                "FUTURE AGENTS (planned):\n"
-                "- explainer_agent: Explains concepts, processes, code, or any topic to users\n"
-                "  Will be used for: explanations, tutorials, concept clarification, how-to questions\n\n"
-                "INSTRUCTIONS:\n"
-                "- Analyze the user's request and determine which specialized agent should handle it\n"
-                "- For database/SQL related queries and visualizations, use transfer_to_data_exploration\n"
-                "- Be helpful and direct in your routing decisions\n"
+                "PREFERENCE HANDLING:\n"
+                "- Handle user preferences INDEPENDENTLY without transferring to other agents\n"
+                "- When user says 'Call me X' or 'My name is X', use update_user_name\n"
+                "- When user requests communication style changes (concise/detailed/balanced), use update_communication_style\n"
+                "- For ANY other preferences (themes, notifications, custom settings, etc.), use save_user_preference\n"
+                "- After updating preferences, confirm briefly and ask if there's anything else\n\n"
+                "ROUTING LOGIC:\n"
+                "- For PREFERENCE-ONLY queries: Handle with profile tools, respond briefly, DO NOT transfer\n"
+                "- For DATA EXPLORATION queries: Transfer to data_exploration_agent\n"
+                "- For MIXED queries (preferences + data): Handle preferences FIRST, then transfer the data part\n"
+                "- For general conversation: Respond normally without transferring\n\n"
+                "TRANSFER RULES:\n"
                 "- IMPORTANT: Only route to agents when you receive a NEW user message, not for agent responses\n"
-                "- CRITICAL: ONLY USE ONE TOOL CALL PER USER MESSAGE. PASS THE FULL TASK IN A SINGLE CALL. DO NOT SEPARATE THE TASK INTO MULTIPLE TOOL CALLS.\n"
-                "- The specialized agent will handle all aspects of the request (multiple charts, queries, etc.)\n"
+                "- CRITICAL: ONLY USE ONE TOOL CALL PER USER MESSAGE for transfers. PASS THE FULL TASK IN A SINGLE CALL.\n"
                 "- Example: If user asks for '3 different charts', call the transfer tool ONCE with the full request\n"
+                "- For mixed queries, handle preferences first, then transfer only the non-preference part\n\n"
+                "EXAMPLES:\n"
+                "- 'Call me Sarah' → Use update_user_name, confirm, no transfer\n"
+                "- 'Show me sales data' → Transfer to data_exploration_agent\n"
+                "- 'Call me Alex and show me the database schema' → Use update_user_name, then transfer 'show me the database schema'\n"
             ),
             name="assistant"
         )
@@ -309,7 +325,11 @@ class ExplainableAgent:
         
         # Add memory checkpointer for interrupt functionality
         memory = self.mongo_memory
-        return graph.compile(interrupt_before=["human_feedback"], checkpointer=memory)
+        # Compile with store if available
+        if self.store:
+            return graph.compile(interrupt_before=["human_feedback"], checkpointer=memory, store=self.store)
+        else:
+            return graph.compile(interrupt_before=["human_feedback"], checkpointer=memory)
     
     def data_exploration_entry(self, state: ExplainableAgentState):
         return state
@@ -368,68 +388,13 @@ class ExplainableAgent:
             return "agent"  # Skip explainer and go directly back to agent
     
     def agent_node(self, state: ExplainableAgentState):
-        """Agent reasoning node"""
+        """Agent reasoning node with improved user preference handling"""
         messages = state["messages"]
         
-        # Get tool descriptions dynamically
-        tool_descriptions = "\n".join([f"- {tool.name}: {tool.description}" for tool in self.tools])
-        prompt_template = hub.pull("langchain-ai/sql-agent-system-prompt")
-        system_message = prompt_template.format(dialect="SQLite", top_k=5)
-        # Add supported visualization types and variants to guide the LLM
-        try:
-            supported = get_supported_charts()
-            charts_help = [
-                f"- {chart_type}: variants = {', '.join(info.get('variants', []))}"
-                for chart_type, info in supported.items()
-            ]
-            supported_charts = "\nSUPPORTED VISUALIZATIONS:\n" + "\n".join(charts_help) + "\n"
-        except Exception:
-            # Non-fatal if utils are unavailable
-            pass
-        system_message += f"""
-
-
-You are a concise SQL database assistant. Answer only what is asked, nothing more.
-- If user asks what tables exist, just list the tables
-- If user asks for data, return the data in markdown table format when appropriate
-- ONLY use smart_transform_for_viz tool when the user EXPLICITLY asks for a chart, graph, or visualization
-- If user asks for multiple charts, call smart_transform_for_viz multiple times with different viz_type parameters, strictly only use supported types.
-- Supported types: {supported_charts}
-- If user did not specify a viz_type, decide the most appropriate type based on the data and context.
-
-- Do NOT use smart_transform_for_viz for regular data queries - just return markdown tables
-- Use tools only when necessary to answer the specific question
-- NEVER generate images or base64 image data (no data:image/png;base64,...). Do not include markdown image tags for charts.
-- For images referenced by the user (not charts) or urls from database, use markdown format: ![Alt text](image_url)
-- For tabular data, format as markdown tables with proper headers and alignment
-- For code, format as markdown code blocks with proper syntax highlighting
-- Give explanation but be direct and brief - no unnecessary explanations or extra tool calls
-- If you can't find any tables or columns, say so, stop the tool calling and provide information. Do not make up data.
-- You can ask follow-up questions to clarify ambiguous requests or missing information.
-- After providing requested data, you MAY briefly suggest ONE relevant next step if it adds clear value (e.g., "Would you like to visualize this data as a chart?"), but keep it minimal and unobtrusive.
-- Do NOT repeatedly prompt for next actions or suggest multiple follow-ups.
-- If the user's request is clear and complete, just answer it directly without suggestions.
-- IMPORTANT: Do NOT call the same tool with same arguments multiple times. Call each tool only once per response.
-- IMPORTANT: Only use smart_transform_for_viz tool when user specifically requests a visualization/chart
-- IMPORTANT: Do not generate any images or base64 data for visualizations - only use the smart_transform_for_viz tool to return a JSON spec for the frontend renderer.
-- If you accidentally produced an image or base64 output, remove it and instead produce a concise textual summary.
-- Follow the plan strictly if one exists.
-
-Examples (Visualization requests):
-Example:
-User: "Show a bar chart of the top 5 actors by film count"
-Assistant (good):
-1) Provide a one-paragraph summary of findings (no images)
-2) Call smart_transform_for_viz with raw_data, columns, and viz_type='bar'
-3) Just brief explanation
-
-Bad Examples (Do NOT do):
-- "![Chart](data:image/png;base64,...)"  (No base64 images)
-- Calling visualization tool without explicit request
-- Using unsupported chart types
-"""
-
-        # Bind tools to LLM so it can call them
+        # Build personalized system message
+        system_message = self._build_system_message()
+        
+        # Bind tools to LLM
         llm_with_tools = self.llm.bind_tools(self.tools)
         
         # Filter out previous system messages to avoid conflicts
@@ -448,6 +413,195 @@ Bad Examples (Do NOT do):
             "query": state.get("query", ""),
             "plan": state.get("plan", "")
         }
+    
+    def _build_system_message(self):
+        """Build system message with user preferences at the top"""
+        
+        # 1. USER PREFERENCES FIRST (most important for personalization)
+        user_context = self._get_user_preferences()
+        
+        # 2. CORE ROLE AND BEHAVIOR
+        base_prompt = """You are a helpful SQL database assistant.
+
+RESPONSE STYLE:
+- Be direct and concise - answer only what is asked
+- Use a clear, professional tone unless user preferences indicate otherwise
+- Format data as markdown tables when showing query results
+- Use code blocks with syntax highlighting for code/SQL
+"""
+        
+        # 3. DATABASE QUERY GUIDELINES
+        db_guidelines = """DATABASE OPERATIONS:
+- List tables when asked "what tables exist"
+- Return data in markdown tables for regular queries
+- DO NOT make up data if tables/columns don't exist - just say so
+- Ask clarifying questions if the request is ambiguous
+"""
+        
+        # 4. VISUALIZATION RULES
+        viz_rules = self._get_visualization_rules()
+        
+        # 5. TOOL USAGE RULES
+        tool_rules = """TOOL USAGE:
+- ONLY call tools when necessary to answer the question
+- NEVER call the same tool twice with identical arguments
+- Use smart_transform_for_viz ONLY when user explicitly requests a chart/graph/visualization
+- Stop and inform user if you can't find required data
+"""
+        
+        # 6. OUTPUT FORMAT RULES
+        output_rules = """OUTPUT FORMAT:
+- NEVER generate base64 images (no data:image/png;base64,...)
+- NEVER use markdown image tags for charts: ![chart](...)
+- For visualizations: only call smart_transform_for_viz tool, don't generate images
+- For user-provided image URLs from database: use markdown format ![Alt](url)
+- Keep explanations brief and relevant
+"""
+        
+        # 7. INTERACTION GUIDELINES
+        interaction_rules = """INTERACTION:
+- After providing data, you MAY suggest ONE relevant next step if valuable
+- Example: "Would you like to visualize this as a chart?"
+- Keep suggestions minimal - don't repeatedly prompt for actions
+- If request is clear and complete, just answer it without extra suggestions
+"""
+        
+        # Combine all sections with clear hierarchy
+        system_message = f"""{user_context}
+
+{base_prompt}
+
+{db_guidelines}
+
+{viz_rules}
+
+{tool_rules}
+
+{output_rules}
+
+{interaction_rules}
+
+EXAMPLES:
+
+Good Visualization Request:
+User: "Show a bar chart of top 5 actors by film count"
+Response:
+1. Brief summary: "Here are the top 5 actors by film count..."
+2. Call smart_transform_for_viz with viz_type='bar'
+3. Done - no images or extra suggestions
+
+Bad Examples (DON'T DO):
+- Generating base64 images
+- Calling visualization without explicit request
+- Using unsupported chart types
+- Calling same tool multiple times
+"""
+        
+        return system_message
+    
+    def _get_user_preferences(self):
+        """Get and format user preferences"""
+        try:
+            from langgraph.config import get_config
+            from src.services.user_memory_service import get_user_memory_service
+            
+            config = get_config()
+            configurable = config.get("configurable", {})
+            user_id = configurable.get("user_id")
+            
+            if not user_id:
+                return ""
+            
+            memory_service = get_user_memory_service()
+            if not getattr(memory_service, "is_configured", False):
+                return ""
+            
+            profile = memory_service.get_user_profile(user_id)
+            if not profile:
+                return ""
+            
+            user_name = profile.get("name", "")
+            comm_style = profile.get("communication_style", "balanced")
+            preferences = profile.get("preferences", {})
+            
+            # Build style-specific instructions
+            style_instructions = {
+                "concise": "Keep responses brief and to-the-point. Use short sentences. Avoid lengthy explanations unless specifically asked.",
+                "detailed": "Provide thorough explanations with context and examples. Include relevant details that help understanding.",
+                "balanced": "Provide clear explanations with moderate detail. Balance brevity with completeness.",
+                "technical": "Use technical terminology freely. Include implementation details and technical context.",
+                "casual": "Use a friendly, conversational tone. Feel free to use contractions and approachable language.",
+                "formal": "Use professional, polite language. Avoid contractions and maintain a formal tone."
+            }
+            
+            style_instruction = style_instructions.get(comm_style, style_instructions["balanced"])
+            
+            # Format preferences context
+            pref_context = f"""═══════════════════════════════════════
+USER PREFERENCES (PRIORITY: HIGHEST)
+═══════════════════════════════════════
+Name: {user_name}
+Communication Style: {comm_style}
+
+STYLE INSTRUCTIONS:
+{style_instruction}
+"""
+            
+            # Add custom preferences if they exist
+            if preferences:
+                pref_context += f"Custom Settings:\n"
+                for key, value in preferences.items():
+                    pref_context += f"  • {key}: {value}\n"
+            
+            pref_context += """
+PERSONALIZATION RULES:
+• Address user as "{name}" when natural and appropriate
+• Strictly follow the communication style throughout your entire response
+• Apply style to ALL parts: greetings, explanations, data presentation, and suggestions
+• Consider custom preferences when relevant to the task
+
+═══════════════════════════════════════
+""".format(name=user_name if user_name else "the user")
+            
+            return pref_context
+            
+        except Exception as e:
+            # Gracefully handle errors - don't break the agent
+            print(f"Warning: Could not load user preferences: {e}")
+            return ""
+    
+    def _get_visualization_rules(self):
+        """Get visualization rules with supported chart types"""
+        try:
+            supported = get_supported_charts()
+            charts_help = [
+                f"  • {chart_type}: variants = {', '.join(info.get('variants', []))}"
+                for chart_type, info in supported.items()
+            ]
+            supported_charts_list = "\n".join(charts_help)
+            
+            return f"""VISUALIZATION GUIDELINES:
+
+Supported Chart Types:
+{supported_charts_list}
+
+When to Create Visualizations:
+• ONLY when user explicitly asks for: chart, graph, visualization, plot
+• Examples: "show a bar chart", "create a line graph", "visualize this data"
+• If user asks for multiple charts, call smart_transform_for_viz separately for each
+
+How to Create Visualizations:
+• Call smart_transform_for_viz with: raw_data, columns, viz_type
+• If viz_type not specified by user, choose the most appropriate based on data
+• Provide brief context before the visualization
+• DO NOT generate any image data yourself
+"""
+        except Exception:
+            return """VISUALIZATION GUIDELINES:
+• Use smart_transform_for_viz tool when user requests charts/graphs
+• Only call when explicitly requested
+• Do not generate image data
+"""
     
     def general_agent_node(self, state: ExplainableAgentState):
         """General-purpose agent that can answer anything"""
@@ -518,16 +672,23 @@ Guidelines:
         
         tools_text = "\n".join(tool_descriptions)
         
+        # Get user preferences for personalized explanation
+        user_preferences = self._get_user_preferences()
+        
         # Generate explanation with full context
-        system_prompt = (
-            "Provide a concise, user-facing explanation (1–2 sentences) of the next step you will take to answer the question.\n\n"
-            f"Internal context (do not expose tool names):\n{tools_text}\n\n"
-            "Use a clear, professional, conversational tone. Focus on the intent and expected outcome, not too detailed on implementation details. "
-            "Do not mention specific tool names or parameters.\n\n"
-            "Examples: \n"
-            "- 'I'll first review the database structure to identify where this information is stored.'\n"
-            "- 'Now, I'll run a targeted query to retrieve the relevant records and summarize the results.'"
-        )
+        system_prompt = f"""{user_preferences}
+
+Provide a concise, user-facing explanation (1–2 sentences) of the next step you will take to answer the question.
+
+Internal context (do not expose tool names):
+{tools_text}
+
+Use a clear, professional, conversational tone. Focus on the intent and expected outcome, not too detailed on implementation details.
+Do not mention specific tool names or parameters.
+
+Examples:
+- 'I'll first review the database structure to identify where this information is stored.'
+- 'Now, I'll run a targeted query to retrieve the relevant records and summarize the results.'"""
 
         
         try:

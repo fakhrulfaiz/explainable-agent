@@ -75,6 +75,15 @@ async def lifespan(app: FastAPI):
     llm = llm_service.get_current_llm()
     logger.info(f"✅ Using LLM: {llm_service.get_current_config()}")
 
+    # Initialize Store for long-term memory
+    from langgraph.store.memory import InMemoryStore
+    from src.services.user_memory_service import get_user_memory_service
+    
+    # Use InMemoryStore for development (use PostgresSaver for production)
+    store = InMemoryStore()
+    user_memory_service = get_user_memory_service(store=store)
+    logger.info("✅ Long-term memory store initialized")
+
     # Initialize MessageManagementService
     from src.repositories.dependencies import get_message_management_service, get_messages_repository, get_chat_thread_repository
     from pymongo.database import Database
@@ -87,12 +96,15 @@ async def lifespan(app: FastAPI):
         llm=llm,
         db_path=settings.database_path,
         logs_dir=settings.logs_dir,
-        mongo_memory=mongodb_manager.get_mongo_memory()
+        mongo_memory=mongodb_manager.get_mongo_memory(),
+        store=store  # Pass store for long-term memory
     )
     
     app.state.llm = llm
     app.state.llm_service = llm_service
     app.state.explainable_agent = explainable_agent
+    app.state.store = store
+    app.state.user_memory_service = user_memory_service
   
     logger.info("All services initialized successfully!")
     

@@ -12,6 +12,7 @@ class ChatMessage(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now, description="Message timestamp")
     message_type: Literal["message", "explorer", "visualization"] = Field(default="message", description="Message type - message, explorer, visualization")
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
+    user_id: Optional[str] = Field(None, description="User ID who owns this message")
     
     # Additional fields from frontend Message interface
     message_id: int = Field(..., description="Message ID from frontend")
@@ -37,6 +38,7 @@ class ChatThread(BaseModel):
     title: Optional[str] = Field(None, description="Chat thread title")
     created_at: datetime = Field(default_factory=datetime.now, description="Thread creation time")
     updated_at: datetime = Field(default_factory=datetime.now, description="Last update time")
+    user_id: Optional[str] = Field(None, description="User ID who owns this thread")
     
     class Config:
         json_encoders = {
@@ -46,6 +48,7 @@ class ChatThread(BaseModel):
 class ChatThreadWithMessages(ChatThread):
     """Chat thread with messages"""
     messages: List[ChatMessage] = Field(..., description="Messages")
+    # user_id is inherited from ChatThread
 
 
 class ChatThreadSummary(BaseModel):

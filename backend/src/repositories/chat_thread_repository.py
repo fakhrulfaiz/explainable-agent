@@ -28,8 +28,15 @@ class ChatThreadRepository(BaseRepository[ChatThread]):
     def _to_document(self, entity: ChatThread) -> Dict[str, Any]:
         return entity.dict()
     
-    async def find_by_thread_id(self, thread_id: str) -> Optional[ChatThread]:
-        return await self.find_by_id(thread_id, "thread_id")
+    async def find_by_thread_id(self, thread_id: str, user_id: Optional[str] = None) -> Optional[ChatThread]:
+        thread = await self.find_by_id(thread_id, "thread_id")
+        if thread and user_id:
+            # Verify ownership
+            thread_user_id = getattr(thread, 'user_id', None)
+            if thread_user_id and thread_user_id != user_id:
+                logger.warning(f"User {user_id} attempted to access thread {thread_id} owned by {thread_user_id}")
+                return None
+        return thread
     
     async def create_thread(self, thread: ChatThread) -> bool:
         return await self.create(thread)
@@ -44,16 +51,22 @@ class ChatThreadRepository(BaseRepository[ChatThread]):
     async def delete_thread(self, thread_id: str) -> bool:
         return await self.delete_by_id(thread_id, "thread_id")
     
-    async def get_threads(self, limit: int = 50, skip: int = 0) -> List[ChatThread]:
+    async def get_threads(self, limit: int = 50, skip: int = 0, user_id: Optional[str] = None) -> List[ChatThread]:
     
         try:
+            # Filter by user_id if provided
+            query = {}
+            if user_id:
+                query["user_id"] = user_id
+            
             cursor = self.collection.find(
-                {},
+                query,
                 {
                     "thread_id": 1,
                     "title": 1,
                     "created_at": 1,
                     "updated_at": 1,
+                    "user_id": 1,
                 }
             ).sort("updated_at", -1).skip(skip).limit(limit)
             
@@ -64,7 +77,8 @@ class ChatThreadRepository(BaseRepository[ChatThread]):
                     thread_id=thread_data["thread_id"],
                     title=thread_data.get("title", "Untitled Chat"),
                     created_at=thread_data["created_at"],
-                    updated_at=thread_data["updated_at"]
+                    updated_at=thread_data["updated_at"],
+                    user_id=thread_data.get("user_id")
                 )
                 summaries.append(summary)
             
@@ -74,5 +88,7 @@ class ChatThreadRepository(BaseRepository[ChatThread]):
             logger.error(f"Error retrieving chat thread summaries: {e}")
             raise Exception(f"Failed to retrieve chat thread summaries: {e}")
     
-    async def count_threads(self) -> int:
+    async def count_threads(self, user_id: Optional[str] = None) -> int:
+        if user_id:
+            return await self.count({"user_id": user_id})
         return await self.count()
