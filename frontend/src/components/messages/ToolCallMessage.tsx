@@ -35,6 +35,7 @@ interface ToolCall {
   input: ToolCallInput;
   status: ToolCallStatus;
   output?: ToolCallOutput | string | null;
+  explanation?: string;
 }
 
 interface ToolCallMessageProps {
@@ -43,23 +44,35 @@ interface ToolCallMessageProps {
 }
 
 export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, content }) => {
-  const getStatusColor = (status: ToolCallStatus): string => {
+  // Determine effective status: disabled if no content, pending if content exists
+  const getEffectiveStatus = (call: ToolCall): ToolCallStatus | 'disabled' => {
+    if (!content || content.trim() === '') {
+      return 'disabled';
+    }
+    return call.status;
+  };
+
+  const getStatusColor = (status: ToolCallStatus | 'disabled'): string => {
     switch (status) {
       case 'approved':
         return 'text-green-600 dark:text-green-400';
       case 'rejected':
         return 'text-red-600 dark:text-red-400';
+      case 'disabled':
+        return 'text-muted-foreground opacity-50';
       default:
         return 'text-yellow-600 dark:text-yellow-400';
     }
   };
 
-  const getStatusIcon = (status: ToolCallStatus) => {
+  const getStatusIcon = (status: ToolCallStatus | 'disabled') => {
     switch (status) {
       case 'approved':
         return <Check className="w-4 h-4" />;
       case 'rejected':
         return <X className="w-4 h-4" />;
+      case 'disabled':
+        return <Clock className="w-4 h-4 opacity-50" />;
       default:
         return <Clock className="w-4 h-4" />;
     }
@@ -81,28 +94,41 @@ export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, con
           </ReactMarkdown>
         </div>
       )}
+      
       <Accordion type="single" collapsible className="space-y-2">
-      {toolCalls.map((call) => (
-        <AccordionItem
-          key={call.id}
-          value={call.id}
-          className="border border-border !border-b rounded-lg px-3 bg-background shadow-sm"
-        >
-            <AccordionTrigger className="hover:no-underline py-2.5">
-              <div className="flex items-center gap-3 w-full">
-                <div className={`${getStatusColor(call.status)}`}>
-                  {getStatusIcon(call.status)}
-                </div>
-                <div className="flex-1 text-left">
-                  <div className="font-semibold text-foreground">
-                    Call: {call.name}
+        {toolCalls.map((call) => {
+          const effectiveStatus = getEffectiveStatus(call);
+          const isDisabled = effectiveStatus === 'disabled';
+          
+          return (
+            <AccordionItem
+              key={call.id}
+              value={call.id}
+              className={`border border-border !border-b rounded-lg px-3 bg-background shadow-sm ${isDisabled ? 'opacity-60 pointer-events-none' : ''}`}
+            >
+              <AccordionTrigger 
+                className={`hover:no-underline py-2.5 ${isDisabled ? 'cursor-not-allowed pointer-events-none' : ''}`}
+                onClick={(e) => {
+                  if (isDisabled) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }
+                }}
+              >
+                <div className="flex items-center gap-3 w-full">
+                  <div className={`${getStatusColor(effectiveStatus)}`}>
+                    {getStatusIcon(effectiveStatus)}
                   </div>
-                  <div className="text-sm text-muted-foreground capitalize">
-                    {call.status}
+                  <div className="flex-1 text-left">
+                    <div className="font-semibold text-foreground">
+                      Call: {call.name}
+                    </div>
+                    <div className="text-sm text-muted-foreground capitalize">
+                      {isDisabled ? 'calling...' : effectiveStatus}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </AccordionTrigger>
+              </AccordionTrigger>
             
             <AccordionContent className="pb-2">
               <div className="space-y-3 pt-1.5">
@@ -137,8 +163,9 @@ export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, con
                 )}
               </div>
             </AccordionContent>
-        </AccordionItem>
-      ))}
+          </AccordionItem>
+        );
+        })}
       </Accordion>
     </>
   );

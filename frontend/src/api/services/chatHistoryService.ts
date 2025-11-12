@@ -27,7 +27,13 @@ export interface AddMessageRequest {
   thread_id: string;
   sender: 'user' | 'assistant';
   content: string;
-  message_type?: 'message' | 'explorer' | 'visualization';
+  content_blocks?: Array<{
+    id: string;
+    type: 'text' | 'tool_calls' | 'explorer' | 'visualizations';
+    needsApproval?: boolean;
+    data: any;
+  }>;
+  message_type?: 'message' | 'explorer' | 'visualization' | 'structured';
   checkpoint_id?: string;
   
   // Additional fields from frontend Message interface
@@ -135,6 +141,7 @@ export class ChatHistoryService {
 
   /**
    * Update message flags (e.g., approval) persistently
+   * @deprecated This endpoint has been removed. Use updateBlockFlags for block-level updates instead.
    */
   static async updateMessageFlags(threadId: string, params: {
     message_id: number;
@@ -147,12 +154,32 @@ export class ChatHistoryService {
     can_retry?: boolean;
     retry_action?: 'approve' | 'feedback' | 'cancel';
   }): Promise<{ success: boolean; message: string; updated_message?: any }> {
-    const response = await this.client.put<{ success: boolean; message: string; updated_message?: any }>(
-      `/chat-history/thread/${threadId}/message/flags`,
+    // Legacy endpoint removed - this is a no-op for backward compatibility
+    console.warn('updateMessageFlags is deprecated. Use updateBlockFlags for block-level updates instead.');
+    return {
+      success: true,
+      message: 'Legacy endpoint removed - use block-level updates instead'
+    };
+  }
+
+  /**
+   * Update block-level status persistently
+   */
+  static async updateBlockFlags(
+    threadId: string,
+    messageId: number,
+    blockId: string,
+    params: {
+      needsApproval?: boolean;
+      messageStatus?: 'pending' | 'approved' | 'rejected' | 'error' | 'timeout';
+    }
+  ): Promise<{ success: boolean; message: string; updated_fields?: string[] }> {
+    const response = await this.client.put<{ success: boolean; message: string; updated_fields?: string[] }>(
+      `/chat-history/thread/${threadId}/message/${messageId}/block/${blockId}/approval`,
       params
     );
     if (!response.success) {
-      throw new Error(response.message || 'Failed to update message flags');
+      throw new Error(response.message || 'Failed to update block flags');
     }
     return response;
   }

@@ -5,6 +5,7 @@ import logging
 
 from src.repositories.chat_thread_repository import ChatThreadRepository
 from src.repositories.checkpoint_repository import CheckpointWriteRepository, CheckpointRepository
+from src.repositories.message_content_repository import MessageContentRepository
 from src.models.chat_models import (
     ChatThread, 
     ChatMessage, 
@@ -24,10 +25,12 @@ class ChatHistoryService:
     def __init__(self, 
                  chat_thread_repo: ChatThreadRepository,
                  checkpoint_service: CheckpointService,
-                 messages_repo: MessagesRepository):
+                 messages_repo: MessagesRepository,
+                 message_content_repo: Optional[MessageContentRepository] = None):
         self.chat_thread_repo = chat_thread_repo
         self.checkpoint_service = checkpoint_service
         self.messages_repo = messages_repo
+        self.message_content_repo = message_content_repo
     
     
     async def create_thread(self, request: CreateChatRequest, user_id: Optional[str] = None) -> ChatThread:
@@ -91,6 +94,18 @@ class ChatHistoryService:
     async def get_thread_messages(self, thread_id: str) -> List[ChatMessage]:
         try:
             messages = await self.messages_repo.get_all_messages_by_thread(thread_id)
+            
+            # Load content blocks for each message if message_content_repo is available
+            if self.message_content_repo:
+                for message in messages:
+                    if message.message_id:
+                        try:
+                            content_blocks = await self.message_content_repo.get_blocks_by_message_id(message.message_id)
+                            message.content = content_blocks
+                        except Exception as e:
+                            logger.warning(f"Failed to load content blocks for message {message.message_id}: {e}")
+                            message.content = []
+            
             return messages
         except Exception as e:
             logger.error(f"Error retrieving chat thread messages {thread_id}: {e}")
@@ -99,33 +114,7 @@ class ChatHistoryService:
     
     
 
-    async def update_message_flags(self, thread_id: str, message_id: int, *,
-                                   needs_approval: Optional[bool] = None,
-                                   approved: Optional[bool] = None,
-                                   disapproved: Optional[bool] = None,
-                                   is_error: Optional[bool] = None,
-                                   is_feedback: Optional[bool] = None,
-                                   has_timed_out: Optional[bool] = None,
-                                   can_retry: Optional[bool] = None,
-                                   retry_action: Optional[str] = None) -> bool:
-        """Persistently update message approval/flag fields by message_id."""
-        try:
-            updates = {
-                "thread_id": thread_id,
-                "needs_approval": needs_approval,
-                "approved": approved,
-                "disapproved": disapproved,
-                "is_error": is_error,
-                "is_feedback": is_feedback,
-                "has_timed_out": has_timed_out,
-                "can_retry": can_retry,
-                "retry_action": retry_action,
-                "updated_at": datetime.now()
-            }
-            return await self.messages_repo.update_message_by_message_id(message_id, updates)
-        except Exception as e:
-            logger.error(f"Error updating message flags for thread {thread_id}, message {message_id}: {e}")
-            raise Exception(f"Failed to update message flags: {e}")
+    # Legacy update_message_flags method removed - use block-level approval instead
 
     async def get_message_by_id(self, thread_id: str, message_id: int) -> Optional[ChatMessage]:
         """Get a specific message by its ID within a thread."""
@@ -150,7 +139,32 @@ class ChatHistoryService:
             for thread in chat_threads:
                 message_count = await self.messages_repo.count_messages_by_thread(thread.thread_id)
                 last_message_obj = await self.messages_repo.get_last_message_by_thread(thread.thread_id)
-                last_message = last_message_obj.content if last_message_obj else None
+                
+                # Extract text preview from content blocks
+                last_message = None
+                if last_message_obj:
+                    # Load content blocks if message_content_repo is available
+                    if self.message_content_repo and last_message_obj.message_id:
+                        try:
+                            content_blocks = await self.message_content_repo.get_blocks_by_message_id(last_message_obj.message_id)
+                            last_message_obj.content = content_blocks
+                        except Exception as e:
+                            logger.warning(f"Failed to load content blocks for message {last_message_obj.message_id}: {e}")
+                            last_message_obj.content = []
+                    
+                    # Extract text from content blocks
+                    if last_message_obj.content:
+                        text_parts = []
+                        for block in last_message_obj.content:
+                            if isinstance(block, dict) and block.get('type') == 'text':
+                                text = block.get('data', {}).get('text', '')
+                                if text:
+                                    text_parts.append(text)
+                        
+                        if text_parts:
+                            # Join all text parts and truncate to 100 chars for preview
+                            preview = ' '.join(text_parts)
+                            last_message = preview[:100] + '...' if len(preview) > 100 else preview
                 
                 thread_summary = ChatThreadSummary(
                     thread_id=thread.thread_id,
@@ -172,9 +186,28 @@ class ChatHistoryService:
     async def delete_thread(self, thread_id: str) -> bool:
     
         try:
+            # First, get all message IDs for this thread to clean up message_content
+            messages = await self.messages_repo.get_all_messages_by_thread(thread_id)
+            message_ids = [msg.message_id for msg in messages if msg.message_id]
+            
+            # Delete all message_content blocks for these messages
+            if message_ids and self.message_content_repo:
+                try:
+                    total_blocks_deleted = 0
+                    for message_id in message_ids:
+                        deleted_count = await self.message_content_repo.delete_blocks_by_message_id(message_id)
+                        total_blocks_deleted += deleted_count
+                    if total_blocks_deleted > 0:
+                        logger.info(f"Deleted {total_blocks_deleted} content blocks for {len(message_ids)} messages in thread {thread_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete message content blocks for thread {thread_id}: {e}")
+                    # Don't fail the whole operation if content block cleanup fails
+            
+            # Delete the messages
+            await self.messages_repo.delete_messages_by_thread(thread_id)
+            
             # Delete the thread
             thread_deleted = await self.chat_thread_repo.delete_thread(thread_id)
-            await self.messages_repo.delete_messages_by_thread(thread_id)
             
             if thread_deleted:
                 logger.info(f"Deleted chat thread: {thread_id}")

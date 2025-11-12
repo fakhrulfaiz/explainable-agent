@@ -202,395 +202,200 @@ async def stream_graph(request: Request, thread_id: str,
         config_user_id = config.get('configurable', {}).get('user_id', 'NOT SET')
         logger.info(f"Starting stream event_generator - thread_id: {thread_id}, user_id in config: {config_user_id}")
         
-        # Track tool calls to match with their results
-        pending_tool_calls = {}  # {tool_call_id: {tool_name, args, node}}
+        pending_tool_calls = {}
+        tool_calls_content_blocks = {}
         
-        # Initial event with thread_id
         initial_data = json.dumps({"thread_id": thread_id})
         yield {"event": event_type, "data": initial_data}
         
         try:
-            logger.info(f"Beginning graph.stream() for thread_id: {thread_id}, user_id: {config_user_id}")
+            last_started_tool_id = None
+            last_started_tool_name = None
+            tool_call_sequence = 0  # Track order of tool calls
+            
             for msg, metadata in agent.graph.stream(input_state, config, stream_mode="messages"):
                 if await request.is_disconnected():
                     break
                 
-                # Handle different message types
                 node_name = metadata.get('langgraph_node', 'unknown')
                 
-                # Handle tool call chunks - accumulate args but don't emit until we have tool_id
                 if hasattr(msg, 'tool_call_chunks') and msg.tool_call_chunks:
                     if node_name in ['agent']:
-                        for chunk in msg.tool_call_chunks:
-                            chunk_dict = chunk if isinstance(chunk, dict) else chunk.dict() if hasattr(chunk, 'dict') else {}
-                            chunk_id = chunk_dict.get('id')
-                            chunk_index = chunk_dict.get('index')
-                            chunk_name = chunk_dict.get('name')
-                            chunk_args_str = chunk_dict.get('args', '')
-                            
-                            # Filter out transfer_to_data_exploration EARLY before accumulation
-                            # Check both current chunk name and any existing tool_name for this chunk_id
-                            if chunk_name == 'transfer_to_data_exploration':
-                                # Clean up any partial accumulation for this tool
-                                if chunk_id and chunk_id in pending_tool_calls:
-                                    del pending_tool_calls[chunk_id]
-                                # Also check index-based keys
-                                if chunk_index is not None:
-                                    index_key = f"index_{chunk_index}"
-                                    if index_key in pending_tool_calls and pending_tool_calls[index_key].get('tool_name') == 'transfer_to_data_exploration':
-                                        del pending_tool_calls[index_key]
-                                continue
-                            
-                            # Also skip if we already know this chunk_id is transfer_to_data_exploration
-                            if chunk_id and chunk_id in pending_tool_calls:
-                                existing_tool_name = pending_tool_calls[chunk_id].get('tool_name', '')
-                                if existing_tool_name == 'transfer_to_data_exploration':
-                                    # Clean up the entry
-                                    del pending_tool_calls[chunk_id]
-                                    continue
-                            
-                            if not chunk_args_str:
-                                continue
-                            
-                            # Use index to track chunks before we get id
-                            # Index 0 = first tool_call, index 1 = second, etc.
-                            tool_key = chunk_id if chunk_id else (f"index_{chunk_index}" if chunk_index is not None else None)
-                            
-                            if not tool_key:
-                                continue
-                            
-                            # Initialize if first chunk
-                            if tool_key not in pending_tool_calls:
-                                pending_tool_calls[tool_key] = {
-                                    'tool_name': '',
-                                    'args_string': '',
-                                    'node': node_name,
-                                    'chunk_id': chunk_id,
-                                    'index': chunk_index,
-                                    'ready_to_emit': False  # Don't emit until we have real id/name
-                                }
-                            
-                            # Update when id/name arrives
-                            if chunk_id:
-                                # Migrate from index key to id key if needed
-                                if tool_key != chunk_id and tool_key.startswith('index_'):
-                                    pending_tool_calls[chunk_id] = pending_tool_calls.pop(tool_key)
-                                    tool_key = chunk_id
-                                pending_tool_calls[tool_key]['chunk_id'] = chunk_id
-                            
-                            if chunk_name:
-                                # Double-check we're not accidentally tracking transfer_to_data_exploration
-                                if chunk_name == 'transfer_to_data_exploration':
-                                    if tool_key in pending_tool_calls:
-                                        del pending_tool_calls[tool_key]
-                                    continue
-                                pending_tool_calls[tool_key]['tool_name'] = chunk_name
-                            
-                            # Accumulate args
-                            pending_tool_calls[tool_key]['args_string'] += chunk_args_str
-                            
-                            # Only emit if we have BOTH tool_id AND tool_name (not just id)
-                            # Otherwise wait for tool_calls message which has both
-                            actual_tool_id = pending_tool_calls[tool_key].get('chunk_id')
-                            current_tool_name = pending_tool_calls[tool_key]['tool_name']
-                            
-                            if actual_tool_id and current_tool_name and not tool_key.startswith('index_'):
-                                # Double-check we're not emitting transfer_to_data_exploration
-                                if current_tool_name == 'transfer_to_data_exploration':
-                                    continue
-                                
-                                # Mark as ready and emit chunk
-                                if not pending_tool_calls[tool_key].get('ready_to_emit'):
-                                    pending_tool_calls[tool_key]['ready_to_emit'] = True
-                                
-                                # Emit tool_call event with args
-                                tool_call_data = json.dumps({
-                                    "status": "tool_call",
-                                    "tool_id": actual_tool_id,
-                                    "tool_name": current_tool_name,
-                                    "args": chunk_args_str,
-                                    "node": node_name
-                                })
-                                yield {"event": "tool_call", "data": tool_call_data}
-                
-                # Handle complete tool_calls messages (get real id/name and start emitting accumulated chunks)
-                if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                    if node_name in ['agent']:
-                        # FIRST PASS: Identify and clean up ALL transfer_to_data_exploration entries
-                        transfer_tool_ids = set()
-                        transfer_indices = set()
+                        chunk = msg.tool_call_chunks[0]
+                        chunk_dict = chunk if isinstance(chunk, dict) else chunk.dict() if hasattr(chunk, 'dict') else {}
+                        chunk_id = chunk_dict.get('id')
+                        chunk_index = chunk_dict.get('index', 0)
+                        chunk_name = chunk_dict.get('name')
+                        chunk_args_str = chunk_dict.get('args', '')
                         
-                        for idx, tool_call in enumerate(msg.tool_calls):
-                            tool_call_dict = tool_call if isinstance(tool_call, dict) else tool_call.dict() if hasattr(tool_call, 'dict') else {}
-                            tool_name = tool_call_dict.get('name', '')
-                            tool_id = tool_call_dict.get('id', '')
-                            
-                            if tool_name == 'transfer_to_data_exploration' and tool_id:
-                                transfer_tool_ids.add(tool_id)
-                                transfer_indices.add(idx)
+                        if chunk_name == 'transfer_to_data_exploration':
+                            continue
                         
-                        # Clean up ALL entries matching transfer_to_data_exploration
-                        # Be conservative: only clean up if we're certain it's transfer_to_data_exploration
-                        for key in list(pending_tool_calls.keys()):
-                            info = pending_tool_calls[key]
-                            chunk_id = info.get('chunk_id')
-                            stored_index = info.get('index')
-                            tool_name = info.get('tool_name', '')
-                            
-                            # Clean up if:
-                            # 1. chunk_id matches a transfer tool_id (most reliable)
-                            # 2. tool_name is explicitly transfer_to_data_exploration
-                            # Note: We don't clean up by index alone to avoid false positives
-                            # Entries with matching index but no chunk_id/tool_name will be handled
-                            # by matching logic which verifies tool_name before using accumulated args
-                            should_clean = False
-                            
-                            if chunk_id and chunk_id in transfer_tool_ids:
-                                should_clean = True
-                            elif tool_name == 'transfer_to_data_exploration':
-                                should_clean = True
-                            
-                            if should_clean:
-                                del pending_tool_calls[key]
+                        tool_key = chunk_id if chunk_id else f"index_{chunk_index}"
                         
-                        # SECOND PASS: Process remaining tool calls
-                        # Track which tool_ids we've seen and matched
-                        seen_tool_ids = set()
-                        matched_indices = set()
-                        
-                        for idx, tool_call in enumerate(msg.tool_calls):
-                            tool_call_dict = tool_call if isinstance(tool_call, dict) else tool_call.dict() if hasattr(tool_call, 'dict') else {}
-                            tool_name = tool_call_dict.get('name', '')
-                            tool_id = tool_call_dict.get('id', '')
+                        if chunk_id and chunk_name and tool_key not in pending_tool_calls:
+                            tool_call_sequence += 1  # Increment for each new tool call
+                            pending_tool_calls[tool_key] = {
+                                'tool_name': chunk_name,
+                                'node': node_name,
+                                'tool_call_id': chunk_id,
+                                'index': chunk_index,
+                                'sequence': tool_call_sequence,  # Track order
+                                'args': '',  # Accumulated args string
+                                'output': None,  # Tool result content
+                                'content': None,  # Tool explanation content
+                                'saved': False
+                            }
                             
-                            if not tool_id:
-                                continue
-                            
-                            # Skip transfer_to_data_exploration (already cleaned up)
-                            if tool_name == 'transfer_to_data_exploration':
-                                continue
-                            
-                            seen_tool_ids.add(tool_id)
-                            
-                            # Find entry that was accumulating by chunk_id or index
-                            tool_info = None
-                            matching_key = None
-                            
-                            # First try to match by chunk_id (most reliable)
-                            for key, info in list(pending_tool_calls.items()):
-                                if info.get('chunk_id') == tool_id:
-                                    # Verify it's not transfer_to_data_exploration (should be cleaned already)
-                                    if info.get('tool_name') != 'transfer_to_data_exploration':
-                                        tool_info = info
-                                        matching_key = key
-                                        break
-                            
-                            # If not found by chunk_id, try matching by index position (idx) in tool_calls array
-                            # This works when chunks arrived with index matching the position in tool_calls
-                            if not tool_info:
-                                index_key = f"index_{idx}"
-                                if index_key in pending_tool_calls:
-                                    entry = pending_tool_calls[index_key]
-                                    entry_chunk_id = entry.get('chunk_id')
-                                    entry_tool_name = entry.get('tool_name', '')
-                                    entry_args = entry.get('args_string', '')
-                                    
-                                    # Only use if:
-                                    # 1. chunk_id matches this tool_id (most reliable), OR
-                                    # 2. It doesn't have a chunk_id yet AND it has no args_string (fresh entry), OR
-                                    # 3. It has a matching tool_name (even without chunk_id)
-                                    # 4. It's not transfer_to_data_exploration
-                                    # 5. It hasn't been matched to another tool
-                                    can_use = False
-                                    if entry_chunk_id == tool_id:
-                                        can_use = True
-                                    elif not entry_chunk_id and not entry_args:
-                                        # Fresh entry with no data yet - safe to use
-                                        can_use = True
-                                    elif not entry_chunk_id and entry_tool_name == tool_name:
-                                        # Matching tool_name even without chunk_id - likely correct
-                                        can_use = True
-                                    
-                                    if can_use and \
-                                       entry_tool_name != 'transfer_to_data_exploration' and \
-                                       idx not in matched_indices:
-                                        tool_info = entry
-                                        matching_key = index_key
-                                        matched_indices.add(idx)
-                                        break
-                            
-                            # If still not found, try to find any unmatched index entry by stored_index
-                            # This handles cases where chunks arrived in separate messages with their own indexing
-                            if not tool_info:
-                                for key, info in list(pending_tool_calls.items()):
-                                    if key.startswith('index_'):
-                                        stored_idx = info.get('index')
-                                        existing_chunk_id = info.get('chunk_id')
-                                        existing_tool_name = info.get('tool_name', '')
-                                        existing_args = info.get('args_string', '')
-                                        
-                                        # Match by stored_index matching current position
-                                        if stored_idx == idx and idx not in matched_indices:
-                                            # Only use if we can verify it's correct:
-                                            # 1. chunk_id matches, OR
-                                            # 2. tool_name matches, OR
-                                            # 3. No chunk_id and no args (fresh entry)
-                                            can_use = False
-                                            if existing_chunk_id == tool_id:
-                                                can_use = True
-                                            elif existing_tool_name == tool_name:
-                                                can_use = True
-                                            elif not existing_chunk_id and not existing_args:
-                                                can_use = True
-                                            
-                                            if can_use and existing_tool_name != 'transfer_to_data_exploration':
-                                                tool_info = info
-                                                matching_key = key
-                                                matched_indices.add(idx)
-                                                break
-                            
-                            # Migrate to tool_id key if needed
-                            if tool_info and matching_key and matching_key != tool_id:
-                                pending_tool_calls[tool_id] = pending_tool_calls.pop(matching_key)
-                            
-                            if not tool_info:
-                                pending_tool_calls[tool_id] = {
-                                    'tool_name': tool_name,
-                                    'args_string': '',
-                                    'node': node_name,
-                                    'chunk_id': tool_id,
-                                    'ready_to_emit': True
-                                }
-                            else:
-                                # Update with real name and id
-                                tool_info['tool_name'] = tool_name
-                                tool_info['chunk_id'] = tool_id
-                                tool_info['ready_to_emit'] = True
-                            
-                            # Emit tool_call event with accumulated args (or empty {} if no args)
-                            args_string = pending_tool_calls[tool_id].get('args_string', '')
-                            
-                            # Parse args_string to get clean JSON for emission
-                            if args_string:
-                                try:
-                                    # Try to parse the accumulated args string
-                                    parsed_args = json.loads(args_string)
-                                    args_for_emission = json.dumps(parsed_args)
-                                except json.JSONDecodeError:
-                                    # If not valid JSON yet, try to extract last complete JSON object
-                                    brace_count = 0
-                                    json_start = None
-                                    last_complete_json = None
-                                    for i, char in enumerate(args_string):
-                                        if char == '{':
-                                            if brace_count == 0:
-                                                json_start = i
-                                            brace_count += 1
-                                        elif char == '}':
-                                            brace_count -= 1
-                                            if brace_count == 0 and json_start is not None:
-                                                try:
-                                                    parsed = json.loads(args_string[json_start:i+1])
-                                                    if isinstance(parsed, dict):
-                                                        last_complete_json = parsed
-                                                except:
-                                                    pass
-                                                json_start = None
-                                    if last_complete_json:
-                                        args_for_emission = json.dumps(last_complete_json)
-                                    else:
-                                        args_for_emission = args_string
-                            else:
-                                # No args accumulated - emit empty dict
-                                args_for_emission = "{}"
-                            
-                            # Always emit tool_call event (even with empty args)
-                            tool_call_data = json.dumps({
-                                "status": "tool_call",
-                                "tool_id": tool_id,
-                                "tool_name": tool_name,
-                                "args": args_for_emission,
-                                "node": node_name
+                            tool_start_data = json.dumps({
+                                "block_type": "tool_calls",
+                                "block_id": f"tool_{chunk_id}",
+                                "tool_call_id": chunk_id,
+                                "tool_name": chunk_name,
+                                "args": "",
+                                "node": node_name,
+                                "action": "start_tool_call"
                             })
-                            yield {"event": "tool_call", "data": tool_call_data}
+                            yield {"event": "content_block", "data": tool_start_data}
+                            
+                            tool_add_block = json.dumps({
+                                "block_type": "tool_calls",
+                                "block_id": f"tool_{chunk_id}",
+                                "tool_call_id": chunk_id,
+                                "tool_name": chunk_name,
+                                "node": node_name,
+                                "action": "add_tool_call"
+                            })
+                            yield {"event": "content_block", "data": tool_add_block}
+                            
+                            last_started_tool_id = chunk_id
+                            last_started_tool_name = chunk_name
+                            
+                            continue
+                    
+                        if chunk_args_str and last_started_tool_id in pending_tool_calls:
+                            tool_info = pending_tool_calls.get(last_started_tool_id, {})
+                            
+                            pending_tool_calls[last_started_tool_id].setdefault('args', '')
+                            pending_tool_calls[last_started_tool_id]['args'] += chunk_args_str
+                            
+                            tool_args_data = json.dumps({
+                                "block_type": "tool_calls",
+                                "block_id": f"tool_{tool_info['tool_call_id']}",
+                                "tool_call_id": tool_info['tool_call_id'],
+                                "tool_name": tool_info['tool_name'],
+                                "args_chunk": chunk_args_str,
+                                "node": node_name,
+                                "action": "stream_args"
+                            })
+                            yield {"event": "content_block", "data": tool_args_data}
                 
-                # Handle tool results (match with tool calls to provide complete info)
                 elif hasattr(msg, 'tool_call_id') and hasattr(msg, 'content'):
                     tool_call_id = msg.tool_call_id
                     
-                    # Find tool_info - could be keyed by tool_call_id or have it in chunk_id
                     tool_info = pending_tool_calls.get(tool_call_id)
                     if not tool_info:
-                        # Search for entry with matching chunk_id
                         for key, info in pending_tool_calls.items():
-                            if info.get('chunk_id') == tool_call_id:
+                            if info.get('tool_call_id') == tool_call_id:
                                 tool_info = info
                                 break
                     
                     if not tool_info:
-                        tool_info = {}
+                        tool_info = {'tool_name': 'unknown'}
                     
-                    # Filter out transfer_to_data_exploration results
                     tool_name = tool_info.get('tool_name', 'unknown')
+                    
                     if tool_name == 'transfer_to_data_exploration':
-                        # Clean up and skip
-                        if tool_call_id in pending_tool_calls:
-                            del pending_tool_calls[tool_call_id]
+                        for key in list(pending_tool_calls.keys()):
+                            if pending_tool_calls[key].get('tool_call_id') == tool_call_id:
+                                del pending_tool_calls[key]
+                                break
                         continue
                     
-                    # Get full input args from accumulated string
-                    input_args = {}
-                    if tool_info.get('args_string'):
+                    tool_key_for_output = None
+                    if tool_call_id in pending_tool_calls:
+                        tool_key_for_output = tool_call_id
+                    else:
+                        for key, info in pending_tool_calls.items():
+                            if info.get('tool_call_id') == tool_call_id:
+                                tool_key_for_output = key
+                                break
+                    
+                    if tool_key_for_output:
+                        pending_tool_calls[tool_key_for_output]['output'] = msg.content
+                    
+                    args_str = tool_info.get('args', '')
+                    parsed_args = {}
+                    if args_str:
                         try:
-                            input_args = json.loads(tool_info['args_string'])
-                        except:
-                            # Find last complete JSON object
-                            args_string = tool_info['args_string']
-                            last_complete_json = None
-                            brace_count = 0
-                            json_start = None
-                            for i, char in enumerate(args_string):
-                                if char == '{':
-                                    if brace_count == 0:
-                                        json_start = i
-                                    brace_count += 1
-                                elif char == '}':
-                                    brace_count -= 1
-                                    if brace_count == 0 and json_start is not None:
-                                        try:
-                                            parsed = json.loads(args_string[json_start:i+1])
-                                            if isinstance(parsed, dict):
-                                                last_complete_json = parsed
-                                        except:
-                                            pass
-                                        json_start = None
-                            if last_complete_json:
-                                input_args = last_complete_json
+                            parsed_args = json.loads(args_str)
+                        except json.JSONDecodeError:
+                            parsed_args = {}
+                    
+                    tool_call_object = {
+                        "name": tool_name,
+                        "input": parsed_args,
+                        "output": msg.content,
+                        "status": "approved"
+                    }
+                    
+                    if tool_call_id not in tool_calls_content_blocks:
+                        tool_calls_content_blocks[tool_call_id] = {
+                            "id": f"tool_{tool_call_id}",
+                            "type": "tool_calls",
+                            "sequence": tool_info.get('sequence', 0),  # Store sequence for sorting
+                            "needsApproval": False,
+                            "data": {
+                                "toolCalls": [tool_call_object],
+                                "content": tool_info.get('content') or None
+                            }
+                        }
+                    else:
+                        tool_calls_content_blocks[tool_call_id]["data"]["toolCalls"].append(tool_call_object)
+                    
+                    if tool_key_for_output:
+                        pending_tool_calls[tool_key_for_output]['saved'] = True
                     
                     tool_result_data = json.dumps({
-                        "status": "tool_result",
+                        "block_type": "tool_calls",
+                        "block_id": f"tool_{tool_call_id}",
                         "tool_call_id": tool_call_id,
                         "tool_name": tool_name,
                         "node": node_name,
-                        "input": input_args,  # Full input parameters
-                        "output": msg.content  # Full output (no truncation)
+                        "input": parsed_args, 
+                        "output": msg.content,
+                        "action": "update_tool_result"
                     })
-                    yield {"event": "tool_result", "data": tool_result_data}
-                    
-                    # Clean up after emitting
-                    if tool_call_id in pending_tool_calls:
-                        del pending_tool_calls[tool_call_id]
+                    yield {"event": "content_block", "data": tool_result_data}
                 
-                # Stream tokens from AI messages for real-time display
                 elif hasattr(msg, 'content') and msg.content:
                     if type(msg).__name__ in ['AIMessageChunk']:
-                        # Filter: only emit tokens/messages from planner or agent nodes
-                        if node_name not in ['planner', 'agent', 'tool_explanation']:
+                        if node_name == 'tool_explanation' and last_started_tool_id:
+                            if last_started_tool_id in pending_tool_calls:
+                                if pending_tool_calls[last_started_tool_id].get('content') is None:
+                                    pending_tool_calls[last_started_tool_id]['content'] = ''
+                                pending_tool_calls[last_started_tool_id]['content'] += msg.content
+                            
+                            if last_started_tool_id in tool_calls_content_blocks:
+                                if tool_calls_content_blocks[last_started_tool_id]["data"].get("content") is None:
+                                    tool_calls_content_blocks[last_started_tool_id]["data"]["content"] = ''
+                                tool_calls_content_blocks[last_started_tool_id]["data"]["content"] += msg.content
+                            
+                            tool_expl_chunk = json.dumps({
+                                "block_type": "tool_calls",
+                                "block_id": f"tool_{last_started_tool_id}",
+                                "tool_call_id": last_started_tool_id,
+                                "tool_name": last_started_tool_name,
+                                "content": msg.content,
+                                "node": node_name,
+                                "action": "update_tool_calls_explanation"
+                            })
+                            yield {"event": "content_block", "data": tool_expl_chunk}
                             continue
-                    
-                        # Preserve whitespace inside chunks to avoid concatenated words
+                        if node_name not in ['planner', 'agent']:
+                            continue
+                        
                         chunk_text = msg.content
-                        # Extract a stable message id for streaming chunks
                         msg_id = _extract_stream_or_message_id(msg, preferred_key='message_id')
                         if chunk_text.startswith("{") or buffer:
                             buffer += chunk_text
@@ -606,26 +411,53 @@ async def stream_graph(request: Request, thread_id: str,
                                     "stream_id": msg_id
                                     })
                                     }
-                                buffer = ""  # reset after full parse
+                                buffer = ""
                                 
                             except json.JSONDecodeError:
                                 continue
                         else:
-                            # Normal token streaming
                             token_data = json.dumps({
+                                "block_type": "text",
+                                "block_id": f"text_{msg_id}",
                                 "content": msg.content,
                                 "node": node_name,
-                                "type": "chunk",
-                                "stream_id": msg_id
+                                "stream_id": msg_id,
+                                "action": "append_text"
                             })
-                            yield {"event": "token", "data": token_data}
+                            yield {"event": "content_block", "data": token_data}
                     elif type(msg).__name__ in ['AIMessage']:
                         msg_id_final = _extract_stream_or_message_id(msg, preferred_key='stream_id')
-                        yield {"event": "message", "data": json.dumps({
+                        
+                        if node_name == 'tool_explanation' and last_started_tool_id:
+                            if last_started_tool_id in pending_tool_calls:
+                                if pending_tool_calls[last_started_tool_id].get('content') is None:
+                                    pending_tool_calls[last_started_tool_id]['content'] = ''
+                                pending_tool_calls[last_started_tool_id]['content'] += msg.content
+                            
+                            if last_started_tool_id in tool_calls_content_blocks:
+                                if tool_calls_content_blocks[last_started_tool_id]["data"].get("content") is None:
+                                    tool_calls_content_blocks[last_started_tool_id]["data"]["content"] = ''
+                                tool_calls_content_blocks[last_started_tool_id]["data"]["content"] += msg.content
+                            
+                            tool_expl_final = json.dumps({
+                                "block_type": "tool_calls",
+                                "block_id": f"tool_{last_started_tool_id}",
+                                "tool_id": last_started_tool_id,
+                                "tool_name": last_started_tool_name,
+                                "content": msg.content,
+                                "node": node_name,
+                                "action": "update_tool_calls_explanation"
+                            })
+                            yield {"event": "content_block", "data": tool_expl_final}
+                            continue
+                        
+                        yield {"event": "content_block", "data": json.dumps({
+                            "block_type": "text",
+                            "block_id": f"text_{msg_id_final}",
                             "content": msg.content,
                             "node": node_name,
-                            "type": "message",
-                            "message_id": msg_id_final
+                            "message_id": msg_id_final,
+                            "action": "finalize_text"
                         })}
             
             # After streaming completes, emit final payloads
@@ -685,25 +517,49 @@ async def stream_graph(request: Request, thread_id: str,
                     "extra_explanation": f"Plan: {plan}"
                 }
 
-            # Send status event (user_feedback or finished)
             if state.next and 'human_feedback' in state.next:
-                # Save assistant message that needs approval when waiting for user feedback
                 if assistant_response and message_service:
                     try:
-                        # Check if this is a replan and clear previous approval flags
                         response_type = values.get("response_type")
                         if response_type == "replan":
                             logger.info(f"Replan detected in streaming - clearing needs_approval from previous messages in thread {thread_id}")
                             await clear_previous_approvals(thread_id, message_service)
                         
+                        content_blocks = []
+
+                        # Sort by sequence to preserve tool call order
+                        sorted_tool_calls = sorted(
+                            tool_calls_content_blocks.items(), 
+                            key=lambda x: x[1].get('sequence', 0)
+                        )
+                        for tool_call_id, content_block in sorted_tool_calls:
+                            if len(content_block["data"]["toolCalls"]) > 0:
+                                content_blocks.append(content_block)
+
+                        if assistant_response:
+                            content_blocks.append({
+                                "id": f"text_{assistant_message_id or int(time.time() * 1000)}",
+                                "type": "text",
+                                "needsApproval": True,
+                                "data": {"text": assistant_response}
+                            })
+                        
+                        if steps and len(steps) > 0 and checkpoint_id:
+                            content_blocks.append({
+                                "id": f"explorer_{checkpoint_id}",
+                                "type": "explorer",
+                                "needsApproval": True,
+                                "data": {"checkpointId": checkpoint_id}
+                            })
+                        
                         saved_message = await message_service.save_assistant_message(
                             thread_id=thread_id,
-                            content=assistant_response,
-                            message_type="message",
+                            content=content_blocks,
+                            message_type="structured",
                             checkpoint_id=checkpoint_id,
-                            needs_approval=True,  # This message needs approval
+                            needs_approval=True,
                             message_id=assistant_message_id,
-                            user_id=user_id  # Pass user_id
+                            user_id=user_id
                         )
                         logger.info(f"Saved assistant message {saved_message.message_id} for approval in thread {thread_id}")
                     except Exception as e:
@@ -715,52 +571,68 @@ async def stream_graph(request: Request, thread_id: str,
                 status_data = json.dumps({"status": "finished"})
                 yield {"event": "status", "data": status_data}
 
-                # Save messages to database when execution finishes
                 try:
-                    # Save main assistant message
+                    content_blocks = []
+                    
+                    # Sort by sequence to preserve tool call order
+                    sorted_tool_calls = sorted(
+                        tool_calls_content_blocks.items(), 
+                        key=lambda x: x[1].get('sequence', 0)
+                    )
+                    for tool_call_id, content_block in sorted_tool_calls:
+                        if len(content_block["data"]["toolCalls"]) > 0:
+                            content_blocks.append(content_block)
+
                     if assistant_response:
-                        await message_service.save_assistant_message(
-                            thread_id=thread_id,
-                            content=assistant_response,
-                            message_type="message",
-                            checkpoint_id=checkpoint_id,
-                            needs_approval=False,
-                            message_id=assistant_message_id,
-                            user_id=user_id  # Pass user_id
-                        )
+                        content_blocks.append({
+                            "id": f"text_{assistant_message_id or int(time.time() * 1000)}",
+                            "type": "text",
+                            "needsApproval": False,
+                                "data": {"text": assistant_response}
+                        })
                     
-                    # Save explorer message if steps exist
-                    if steps and len(steps) > 0:
-                        explorer_content = f"Data exploration completed with {len(steps)} steps"
-                        if final_result_dict:
-                            explorer_content += f": {final_result_dict.get('summary', '')}"
-                        
-                        await message_service.save_assistant_message(
-                            thread_id=thread_id,
-                            content=explorer_content,
-                            message_type="explorer",
-                            checkpoint_id=checkpoint_id,
-                            needs_approval=False,
-                            user_id=user_id  # Pass user_id
-                        )
+                    if steps and len(steps) > 0 and checkpoint_id:
+                        content_blocks.append({
+                            "id": f"explorer_{checkpoint_id}",
+                            "type": "explorer", 
+                            "needsApproval": False,
+                                "data": {"checkpointId": checkpoint_id}
+                        })
                     
-                    # Save visualization message if visualizations exist
                     visualizations = values.get("visualizations", [])
-                    if visualizations and len(visualizations) > 0:
-                        viz_types = list({v.get("type", "unknown") for v in visualizations if isinstance(v, dict)})
-                        viz_content = f"Generated {len(visualizations)} visualization(s): {', '.join(viz_types)}"
-                        
-                        await message_service.save_assistant_message(
-                            thread_id=thread_id,
-                            content=viz_content,
-                            message_type="visualization",
-                            checkpoint_id=checkpoint_id,
-                            needs_approval=False,
-                            user_id=user_id  # Pass user_id
-                        )
+                    if visualizations and len(visualizations) > 0 and checkpoint_id:
+                        content_blocks.append({
+                            "id": f"viz_{checkpoint_id}",
+                            "type": "visualizations",
+                            "needsApproval": False,
+                                "data": {"checkpointId": checkpoint_id}
+                        })
+                    
+                    await message_service.save_assistant_message(
+                        thread_id=thread_id,
+                        content=content_blocks,
+                        message_type="structured",
+                        checkpoint_id=checkpoint_id,
+                        needs_approval=False,
+                        message_id=assistant_message_id,
+                        user_id=user_id
+                    )
                         
                 except Exception as e:
                     print(f"Failed to save messages for thread {thread_id}: {e}")
+
+                # Emit explorer content block if steps exist
+                if steps and len(steps) > 0 and checkpoint_id:
+                    explorer_block_data = json.dumps({
+                        "block_type": "explorer",
+                        "block_id": f"explorer_{checkpoint_id}",
+                        "checkpoint_id": checkpoint_id,
+                        "steps": steps,
+                        "final_result": final_result_dict,
+                        "overall_confidence": overall_confidence,
+                        "action": "add_explorer"
+                    })
+                    yield {"event": "content_block", "data": explorer_block_data}
 
                 # Emit enriched completed payload
                 completed_payload = {
@@ -788,6 +660,20 @@ async def stream_graph(request: Request, thread_id: str,
                 except Exception:
                     _normalize_visualizations = lambda v: v if isinstance(v, list) else []
                 visualizations = _normalize_visualizations(values.get("visualizations", []))
+                
+                # Emit visualization content block if visualizations exist
+                if visualizations and len(visualizations) > 0 and checkpoint_id:
+                    viz_block_data = json.dumps({
+                        "block_type": "visualizations",
+                        "block_id": f"viz_{checkpoint_id}",
+                        "checkpoint_id": checkpoint_id,
+                        "visualizations": visualizations,
+                        "count": len(visualizations),
+                        "types": list({v.get("type") for v in visualizations if isinstance(v, dict) and v.get("type")}),
+                        "action": "add_visualizations"
+                    })
+                    yield {"event": "content_block", "data": viz_block_data}
+                
                 try:
                     visualization_types = list({v.get("type") for v in visualizations if isinstance(v, dict) and v.get("type")})
                     visualizations_payload = {
@@ -805,14 +691,15 @@ async def stream_graph(request: Request, thread_id: str,
                 except Exception:
                     pass
                 
-            # Clean up the thread configuration after streaming is complete
+            pending_tool_calls.clear()
+            tool_calls_content_blocks.clear()
+                
             if thread_id in run_configs:
                 del run_configs[thread_id]
                 
         except Exception as e:
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
             
-            # Clean up on error as well
             if thread_id in run_configs:
                 del run_configs[thread_id]
     

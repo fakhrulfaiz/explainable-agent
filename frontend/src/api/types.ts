@@ -28,9 +28,13 @@ export interface ChatResponse {
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
+  content: Array<{
+    id: string;
+    type: 'text' | 'tool_calls' | 'explorer' | 'visualizations';
+    needsApproval?: boolean;
+    data: any;
+  }>;
   timestamp: string;
-  explanation?: string;
 }
 
 // Agent API Types

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
-import { Message as MessageType, ChatComponentProps, HandlerResponse } from '../types/chat';
+import { Message as MessageType, ChatComponentProps, HandlerResponse, ContentBlock, ToolCallsContent, createTextBlock, createToolCallsBlock, createExplorerBlock, createVisualizationsBlock } from '../types/chat';
 import { useUIState } from '../contexts/UIStateContext';
 import Message from './Message';
 import GeneratingIndicator from './GeneratingIndicator';
@@ -73,6 +73,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   const [inputValue, setInputValue] = useState<string>('');
   const [pendingApproval, setPendingApproval] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   // Streaming UI state
   const [streamingActive, setStreamingActive] = useState<boolean>(false);
   const useStreaming = state.useStreaming;
@@ -102,13 +103,32 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
 
 
 
-  const scrollToBottom = (): void => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // Check if user is near the bottom of the messages container
+  const checkIfNearBottom = (): boolean => {
+    const container = messagesContainerRef.current;
+    if (!container) return true;
+    
+    const threshold = 100; // pixels from bottom
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    
+    return scrollHeight - scrollTop - clientHeight < threshold;
   };
+
+  const scrollToBottom = (force: boolean = false): void => {
+    if (force || checkIfNearBottom()) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  // Track scroll position (listener is set up but state tracking removed as we check on-demand)
+  // The checkIfNearBottom function is called directly when needed
 
   useEffect(() => {
     if (messages.length > 0) {
-      scrollToBottom();
+      // Only auto-scroll if user is near bottom (not forced)
+      scrollToBottom(false);
     }
   }, [messages]);
 
@@ -145,10 +165,11 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   const createExplorerMessage = useCallback((response: HandlerResponse): void => {
     if (!response.explorerData) return;
     
+    const explorerMessageId = Date.now() + Math.floor(Math.random() * 1000);
     const explorerMessage: MessageType = {
-      id: Date.now() + Math.floor(Math.random() * 1000), // Ensure unique ID with random component
+      id: explorerMessageId,
       role: 'assistant',
-      content: response.message,
+      content: response.message ? [createTextBlock(`text_${explorerMessageId}`, response.message, false)] : [],
       timestamp: new Date(),
       messageType: 'explorer',
       checkpointId: response.explorerData.checkpoint_id, 
@@ -168,16 +189,17 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
       createExplorerMessage(response);
     }
     if (response.visualizations && response.visualizations.length > 0) {
+      const vizMessageId = Date.now() + Math.floor(Math.random() * 1000) + 10000;
       const vizMessage: MessageType = {
-        id: Date.now() + Math.floor(Math.random() * 1000) + 10000, // Ensure unique ID with different random component
+        id: vizMessageId,
         role: 'assistant',
-        content: response.message,
+        content: response.message ? [createTextBlock(`text_${vizMessageId}`, response.message, false)] : [],
         timestamp: new Date(),
         messageType: 'visualization',
         checkpointId: response.checkpoint_id, // Add checkpoint ID for visualization messages
         metadata: { visualizations: response.visualizations },
         threadId: contextThreadId || currentThreadId || undefined
-      } as any;
+      };
       setTimeout(() => {
         setMessages(prev => [...prev, vizMessage]);
       }, 50);
@@ -193,7 +215,7 @@ const handleStreamingError = useCallback((
 ) => {
   setMessages(prev => prev.map(m => 
     m.id === streamingMsgId
-      ? { ...m, content: `Error: ${streamErr.message || 'Streaming failed'}`, isError: true, isStreaming: false }
+      ? { ...m, content: [createTextBlock(`error_${streamingMsgId}`, `Error: ${streamErr.message || 'Streaming failed'}`, false)], messageStatus: 'error' as const, isStreaming: false }
       : m
   ));
 }, []);
@@ -319,47 +341,17 @@ const handleToolEvents = useCallback((
   }
 }, []);
 
-const updateMessageCallback = useCallback(
-  (messageId: number, appendContent: string): void => {
-    let parsedContent: string | null = null;
-    try {
-      const parsed = JSON.parse(appendContent);
-      if (parsed && typeof parsed === "object") {
-        if (parsed.id && parsed.role && parsed.messageType) {
-          const newMessage: MessageType = {
-            id: parsed.id,
-            role: parsed.role as 'assistant' | 'user',
-            content: parsed.content,
-            timestamp: new Date(parsed.timestamp),
-            messageType: parsed.messageType,
-            checkpointId: parsed.checkpointId,
-            metadata: parsed.metadata,
-            threadId: parsed.threadId
-          };
-          
-          setMessages(prev => [...prev, newMessage]);
-       
-          return;
-        }
-        if ("content" in parsed) {
-          parsedContent = parsed.content;
-        }
-
-      }
-    } catch {
-      
-    }
-
-    const finalAppend = parsedContent ?? appendContent;
+// New callback for content blocks
+const updateContentBlocksCallback = useCallback(
+  (messageId: number, contentBlocks: ContentBlock[]): void => {
     setMessages(prev =>
-        prev.map(m => {
-          if (m.id === messageId) {
-            return { ...m, content: (m.content || "") + finalAppend };
-          }
-          return m;
-        })
-      );
-    
+      prev.map(m => {
+        if (m.id === messageId) {
+          return { ...m, content: contentBlocks };
+        }
+        return m;
+      })
+    );
   },
   []
 );
@@ -367,6 +359,9 @@ const updateMessageCallback = useCallback(
 
   const handleSend = async (): Promise<void> => {
     if (!inputValue.trim() || isLoading || disabled || streamingActive) return;
+
+    // Force scroll to bottom when user sends a message
+    scrollToBottom(true);
 
     const userMessage = inputValue.trim();
     
@@ -376,12 +371,12 @@ const updateMessageCallback = useCallback(
       if (!message) return;
 
       // Add feedback as a user message
+      const feedbackMessageId = Date.now();
       const feedbackMessage: MessageType = {
-        id: Date.now(),
+        id: feedbackMessageId,
         role: 'user',
-        content: userMessage,
-        timestamp: new Date(),
-        isFeedback: true
+        content: [createTextBlock(`text_${feedbackMessageId}`, userMessage, false)],
+        timestamp: new Date()
       };
 
       setMessages(prev => [...prev, feedbackMessage]);
@@ -399,7 +394,7 @@ const updateMessageCallback = useCallback(
             const streamingMessage: MessageType = {
               id: streamingMsgId,
               role: 'assistant',
-              content: '',
+              content: [], // Initialize with empty content blocks array
               timestamp: new Date(),
               isStreaming: true,
               needsApproval: false
@@ -407,7 +402,7 @@ const updateMessageCallback = useCallback(
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
             setPendingApproval(null);
-            await (result as HandlerResponse).streamingHandler!(streamingMsgId, updateMessageCallback, (status, eventData, responseType) => {
+            await (result as HandlerResponse).streamingHandler!(streamingMsgId, updateContentBlocksCallback, (status, eventData, responseType) => {
               if (!status) return;
               
               // Handle tool events
@@ -442,7 +437,7 @@ const updateMessageCallback = useCallback(
             const assistantMessage: MessageType = {
               id: finalId,
               role: 'assistant',
-              content: (result as HandlerResponse).message || 'Response received',
+              content: (result as HandlerResponse).message ? [createTextBlock(`text_${finalId}`, (result as HandlerResponse).message || 'Response received', false)] : [],
               timestamp: new Date(),
               needsApproval: (result as HandlerResponse).needsApproval || false
             };
@@ -466,7 +461,7 @@ const updateMessageCallback = useCallback(
     const newUserMessage: MessageType = {
       id: tempUserId,
       role: 'user',
-      content: userMessage,
+      content: [createTextBlock(`text_${tempUserId}`, userMessage, false)],
       timestamp: new Date(),
       threadId: contextThreadId || currentThreadId || undefined,
       metadata: {
@@ -485,7 +480,7 @@ const updateMessageCallback = useCallback(
         const streamingMessage: MessageType = {
           id: streamingMsgId,
           role: 'assistant',
-          content: '',
+          content: [], // Initialize with empty content blocks array
           timestamp: new Date(),
           threadId: contextThreadId || currentThreadId || undefined,
           isStreaming: true
@@ -494,125 +489,253 @@ const updateMessageCallback = useCallback(
         setStreamingActive(true);
 
         try {
-          await response.streamingHandler(streamingMsgId, updateMessageCallback, (status, eventData, responseType) => {
-            if (!status) return;            
+          // Track content blocks for the streaming message
+          let currentContentBlocks: ContentBlock[] = [];
+          
+          await response.streamingHandler(streamingMsgId, updateContentBlocksCallback, (status, eventData, responseType) => {
+            if (!status) return;
             
-            // Handle tool_call event - parse complete args and update message
-            if (status === 'tool_call' && eventData) {
+            // Handle content_block events
+            if (status === 'content_block' && eventData) {
               try {
-                const toolData = JSON.parse(eventData);
-                const toolId = toolData.tool_id || toolData.tool_call_id || `tool_${Date.now()}`;
-                const toolName = toolData.tool_name || 'Unknown Tool';
-                const argsString = toolData.args || '';
+                const blockData = JSON.parse(eventData);
+                const blockType = blockData.block_type;
+                const blockId = blockData.block_id;
+                const action = blockData.action;
                 
-                // Parse complete args directly
-                let parsedArgs: any = {};
-                if (argsString) {
-                  try {
-                    parsedArgs = JSON.parse(argsString);
-                  } catch (error) {
-                    // If parsing fails, keep empty object
-                    console.warn('Failed to parse tool args:', error);
-                  }
-                }
-                
-                // Update existing message or create new one
-                setMessages(prev => {
-                  const existingMessage = prev.find(m => 
-                    m.messageType === 'tool_call' && 
-                    m.metadata?.toolCalls?.some((tc: any) => tc.id === toolId)
-                  );
-                  
-                  if (existingMessage) {
-                    // Update existing
-                    return prev.map(m => {
-                      if (m.id === existingMessage.id && m.metadata?.toolCalls) {
-                        return {
-                          ...m,
-                          metadata: {
-                            ...m.metadata,
-                            toolCalls: m.metadata.toolCalls.map((tc: any) =>
-                              tc.id === toolId ? { ...tc, input: parsedArgs } : tc
-                            )
-                          }
-                        };
-                      }
-                      return m;
-                    });
-                  } else {
-                    // Create new
-                    const toolCallMessageId = Date.now() + Math.random();
-                    const toolCallMessage: MessageType = {
-                      id: toolCallMessageId,
-                      role: 'assistant',
-                      content: '',
-                      timestamp: new Date(),
-                      messageType: 'tool_call',
-                      threadId: contextThreadId || currentThreadId || undefined,
-                      metadata: {
-                        toolCalls: [{
-                          id: toolId,
-                          name: toolName,
-                          input: parsedArgs,
-                          status: 'pending' as const
-                        }]
-                      }
-                    };
-                    return [...prev, toolCallMessage];
-                  }
-                });
-                
-                // Also update ephemeral tool indicator
-                handleToolEvents(status, eventData, streamingMsgId);
-              } catch (error) {
-                console.error('Error handling tool_call event:', error);
-              }
-              return;
-            }
-            
-            // Handle tool_result event - update with output and full input from backend
-            if (status === 'tool_result' && eventData) {
-              try {
-                const resultData = JSON.parse(eventData);
-                const toolCallId = resultData.tool_call_id;
-                let toolOutput = resultData.output || resultData.content || '';
-                const toolInput = resultData.input || {}; // Full input from backend
-                
-                // Try to parse output as JSON, if it fails use original
-                if (typeof toolOutput === 'string' && toolOutput.trim()) {
-                  try {
-                    const parsedOutput = JSON.parse(toolOutput);
-                    toolOutput = parsedOutput;
-                  } catch (error) {
-                    // Not valid JSON, use original string output
-                  }
-                }
-                
-                // Update message with output and full input
-                setMessages(prev => prev.map(m => {
-                  if (m.messageType === 'tool_call' && m.metadata?.toolCalls) {
-                    const updatedToolCalls = m.metadata.toolCalls.map((tc: any) => 
-                      tc.id === toolCallId
-                        ? { ...tc, input: toolInput, output: toolOutput, status: 'approved' as const }
-                        : tc
-                    );
-                    if (updatedToolCalls.some((tc: any) => tc.id === toolCallId)) {
-                      return {
-                        ...m,
-                        metadata: { ...m.metadata, toolCalls: updatedToolCalls }
-                      };
+                if (blockType === 'text') {
+                  if (action === 'append_text') {
+                    // Find existing text block or create new one
+                    let textBlock = currentContentBlocks.find(b => b.id === blockId);
+                    if (!textBlock) {
+                      textBlock = createTextBlock(blockId, '', false);
+                      currentContentBlocks = [...currentContentBlocks, textBlock];
+                    }
+                    // Append text content
+                    (textBlock.data as any).text += blockData.content;
+                    
+        
+                  } else if (action === 'finalize_text') {
+                    // Update final text content
+                    let textBlock = currentContentBlocks.find(b => b.id === blockId);
+                    if (textBlock) {
+                      (textBlock.data as any).text = blockData.content;
                     }
                   }
-                  return m;
-                }));
+                } else if (blockType === 'tool_calls') {
+
+                  const toolCallId = blockData.tool_call_id || `tool_calls_${streamingMsgId}`;
+                  let consolidatedBlock = currentContentBlocks.find(b => b.id === toolCallId && b.type === 'tool_calls');
+                  
+                  if (action === 'stream_args') {
+                    // Ensure consolidatedBlock exists
+                    if (!consolidatedBlock) {
+                      const toolCall = {
+                        name: blockData.tool_name,
+                        input: {},
+                        status: 'pending' as const
+                      };
+                      consolidatedBlock = createToolCallsBlock(toolCallId, [toolCall], false);
+                      currentContentBlocks = [...currentContentBlocks, consolidatedBlock];
+                    }
+                    
+                    const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
+                    let toolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
+                    
+                    // Create tool call if it doesn't exist
+                    if (toolCallIndex < 0) {
+                      toolCallsData.toolCalls.push({
+                        name: blockData.tool_name,
+                        input: {},
+                        status: 'pending' as const
+                      });
+                      toolCallIndex = toolCallsData.toolCalls.length - 1;
+                    }
+                    
+                    // Accumulate args_chunk and parse JSON when complete
+                    const existingArgs = (toolCallsData.toolCalls[toolCallIndex] as any)._argsBuffer || '';
+                    const accumulatedArgs = existingArgs + (blockData.args_chunk || '');
+                    
+                    // Store buffer for next chunk
+                    (toolCallsData.toolCalls[toolCallIndex] as any)._argsBuffer = accumulatedArgs;
+                    
+                    // Try to parse the accumulated JSON - only update if valid JSON
+                    try {
+                      const parsedInput = JSON.parse(accumulatedArgs);
+                      console.log('[stream_args] Updated input:', parsedInput);
+                      
+                      // Only update input when JSON is successfully parsed
+                      // Create a new array with the updated tool call
+                      const updatedToolCalls = [...toolCallsData.toolCalls];
+                      const existingToolCall = updatedToolCalls[toolCallIndex];
+                      
+                      updatedToolCalls[toolCallIndex] = {
+                        ...existingToolCall,
+                        input: parsedInput,
+                        // Preserve the buffer for potential future updates
+                        _argsBuffer: accumulatedArgs
+                      } as any;
+                      
+                      // Create new toolCallsData with updated tool calls
+                      const updatedToolCallsData: ToolCallsContent = {
+                        ...toolCallsData,
+                        toolCalls: updatedToolCalls
+                      };
+                      
+                      // Update the block in the array
+                      currentContentBlocks = currentContentBlocks.map(block => 
+                        block.id === toolCallId 
+                          ? { ...block, data: updatedToolCallsData }
+                          : block
+                      );
+                      
+                      // Update UI immediately when JSON is valid
+                      updateContentBlocksCallback(streamingMsgId, [...currentContentBlocks]);
+                    } catch (e) {
+                      // JSON is incomplete, don't update input yet - wait for more chunks
+                      // Keep the existing input (or empty object) until JSON is complete
+                    }
+                    
+                  } else if (action === 'update_tool_calls_explanation') {
+                   
+                    if (!consolidatedBlock) {
+                      const newToolCallsBlock = createToolCallsBlock(toolCallId, [], false);
+                      (newToolCallsBlock.data as ToolCallsContent).content = '';
+                      consolidatedBlock = newToolCallsBlock;
+                      currentContentBlocks = [...currentContentBlocks, consolidatedBlock];
+                    }
+              
+                    const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
+                    const existing = typeof toolCallsData.content === 'string' ? toolCallsData.content : '';
+                    toolCallsData.content = existing + (blockData.content || '');
+                    // Update the block in the array
+                    currentContentBlocks = currentContentBlocks.map(block => 
+                      block.id === toolCallId 
+                        ? { ...block, data: toolCallsData }
+                        : block
+                    );
+                  } else if (action === 'add_tool_call') {
+                    const parsedArgs = blockData.args ? JSON.parse(blockData.args) : {};
+                    
+                    if (!consolidatedBlock) {
+                      // Create new consolidated tool calls block
+                      const toolCall = {
+                        name: blockData.tool_name,
+                        input: parsedArgs || {},  // Ensure input is always an object
+                        status: 'pending' as const
+                      };
+                      consolidatedBlock = createToolCallsBlock(toolCallId, [toolCall], false);
+                      currentContentBlocks = [...currentContentBlocks, consolidatedBlock];
+                    
+                    } else { 
+                      // Add or update tool call in consolidated block
+                      const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
+                      const existingToolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
+                      
+                      if (existingToolCallIndex >= 0) {
+                        // Update existing tool call with input, but preserve existing input if parsedArgs is empty
+                        const existingInput = toolCallsData.toolCalls[existingToolCallIndex].input;
+                        const newInput = (parsedArgs && Object.keys(parsedArgs).length > 0) ? parsedArgs : existingInput;
+                        toolCallsData.toolCalls = [
+                          ...toolCallsData.toolCalls.slice(0, existingToolCallIndex),
+                          { ...toolCallsData.toolCalls[existingToolCallIndex], input: newInput },
+                          ...toolCallsData.toolCalls.slice(existingToolCallIndex + 1)
+                        ];
+                      } else {
+                        // Add new tool call
+                        toolCallsData.toolCalls = [
+                          ...toolCallsData.toolCalls,
+                          {
+                            name: blockData.tool_name,
+                            input: parsedArgs || {},  // Ensure input is always an object
+                            status: 'pending' as const
+                          }
+                        ];
+                      }
+                      
+                      // Update the block in the array
+                      currentContentBlocks = currentContentBlocks.map(block => 
+                        block.id === toolCallId 
+                          ? { ...block, data: toolCallsData }
+                          : block
+                      );
+                    }
+                    
+                  } else if (action === 'update_tool_result') {
+                    // Update tool result for specific tool call in consolidated block
+                    if (consolidatedBlock) {
+                      const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
+                      const toolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
+                      if (toolCallIndex >= 0) {
+                        const existingToolCall = toolCallsData.toolCalls[toolCallIndex];
+                        // Use input from blockData if provided and not empty, otherwise preserve existing input
+                        const finalInput = (blockData.input && Object.keys(blockData.input).length > 0) 
+                          ? blockData.input 
+                          : (existingToolCall.input && Object.keys(existingToolCall.input).length > 0 
+                              ? existingToolCall.input 
+                              : {});
+                        
+                        // Update tool call with result and input
+                        const updatedToolCall = {
+                          ...existingToolCall,
+                          input: finalInput,
+                          output: blockData.output,
+                          status: 'approved' as const
+                        };
+                        
+                        toolCallsData.toolCalls = [
+                          ...toolCallsData.toolCalls.slice(0, toolCallIndex),
+                          updatedToolCall,
+                          ...toolCallsData.toolCalls.slice(toolCallIndex + 1)
+                        ];
+                        
+                        // Update the block in the array
+                        currentContentBlocks = currentContentBlocks.map(block => 
+                          block.id === toolCallId 
+                            ? { ...block, data: toolCallsData }
+                            : block
+                        );
+                        
+                        // Update UI
+                        updateContentBlocksCallback(streamingMsgId, [...currentContentBlocks]);
+                      }
+                    }
+                    
+                    // Also update ephemeral tool indicator when tool result arrives
+                    handleToolEvents('tool_result', eventData, streamingMsgId);
+                  }
+                } else if (blockType === 'explorer' && action === 'add_explorer') {
+                  // Add explorer content block with the actual explorer data
+                  const explorerData = {
+                    steps: blockData.steps || [],
+                    final_result: blockData.final_result || {},
+                    overall_confidence: blockData.overall_confidence || 0,
+                    checkpoint_id: blockData.checkpoint_id,
+                    query: blockData.query || '',
+                    run_status: 'finished' // Default status for completed explorer blocks
+                  };
+                  const explorerBlock = createExplorerBlock(blockId, blockData.checkpoint_id, false, explorerData);
+                  currentContentBlocks = [...currentContentBlocks, explorerBlock];
+                } else if (blockType === 'visualizations' && action === 'add_visualizations') {
+                  // Add visualizations content block with the actual visualization data
+                  const visualizations = blockData.visualizations || [];
+                  const vizBlock = createVisualizationsBlock(blockId, blockData.checkpoint_id, false, visualizations);
+                  currentContentBlocks = [...currentContentBlocks, vizBlock];
+                }
                 
-                handleToolEvents(status, eventData, streamingMsgId);
+                // Update the message with current content blocks
+                updateContentBlocksCallback(streamingMsgId, [...currentContentBlocks]);
+                
+                // Also update ephemeral tool indicator for tool events
+                if (blockType === 'tool_calls') {
+                  handleToolEvents('tool_call', eventData, streamingMsgId);
+                }
               } catch (error) {
-                console.error('Error handling tool_result event:', error);
+                console.error('Error handling content_block event:', error);
               }
               return;
             }
-            
+        
             // Handle tool events for ephemeral indicators
             handleToolEvents(status, eventData, streamingMsgId);
             
@@ -627,12 +750,17 @@ const updateMessageCallback = useCallback(
               } catch {
                 errorText = eventData || 'Unknown error';
               }
+              
+              // Add error as text content block
+              const errorBlock = createTextBlock(`error_${Date.now()}`, errorText ? `Error: ${errorText}` : 'Unknown error', false);
+              currentContentBlocks = [...currentContentBlocks, errorBlock];
+              updateContentBlocksCallback(streamingMsgId, [...currentContentBlocks]);
+              
               setMessages(prev => prev.map(m => 
                 m.id === streamingMsgId
                   ? { 
                       ...m,
-                      content: (m.content || '') + (errorText ? `\nError: ${errorText}` : ''),
-                      isError: true,
+                      messageStatus: 'error' as const,
                       isStreaming: false
                     }
                   : m
@@ -671,14 +799,14 @@ const updateMessageCallback = useCallback(
           setStreamingActive(false);
         }
       } else {
-      const messageContent = handleResponse(response);
+      const messageText = handleResponse(response);
       const backendId = response.backendMessageId;
       const tempId = Date.now() + 1;
       const finalId = backendId || tempId;
       const assistantMessage: MessageType = {
         id: finalId, // Use backend ID if available
         role: 'assistant',
-        content: messageContent,
+        content: messageText ? [createTextBlock(`text_${finalId}`, messageText, false)] : [],
         timestamp: new Date(),
         needsApproval: response.needsApproval,
         threadId: contextThreadId || currentThreadId || undefined
@@ -694,12 +822,13 @@ const updateMessageCallback = useCallback(
 
     } catch (error) {
       // Add error message
+      const errorMessageId = Date.now() + 1;
       const errorMessage: MessageType = {
-        id: Date.now() + 1,
+        id: errorMessageId,
         role: 'assistant',
-        content: `Error: ${(error as Error).message || 'Something went wrong'}`,
+        content: [createTextBlock(`error_${errorMessageId}`, `Error: ${(error as Error).message || 'Something went wrong'}`, false)],
         timestamp: new Date(),
-        isError: true
+        messageStatus: 'error' as const
       };
 
       setMessages(prev => [...prev, errorMessage]);
@@ -725,14 +854,21 @@ const updateMessageCallback = useCallback(
     try {
       
       if (onApprove) {
-        const result = await onApprove(message.content, message);
+        // Extract text content from content blocks for onApprove
+        const textContent = Array.isArray(message.content) 
+          ? message.content
+              .filter(block => block.type === 'text')
+              .map(block => (block.data as any).text)
+              .join('\n')
+          : message.content;
+        const result = await onApprove(textContent, message);
         if (result) {
           if ((result as HandlerResponse).isStreaming && (result as HandlerResponse).streamingHandler) {
             const streamingMsgId = Date.now() + 1;
             const streamingMessage: MessageType = {
               id: streamingMsgId,
               role: 'assistant',
-              content: '',
+              content: [], // Initialize with empty content blocks array
               timestamp: new Date(),
               threadId: message.threadId || contextThreadId || currentThreadId || undefined,
               isStreaming: true
@@ -740,7 +876,7 @@ const updateMessageCallback = useCallback(
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
             try {
-              await (result as HandlerResponse).streamingHandler!(streamingMsgId, updateMessageCallback, (status, eventData, responseType) => {
+              await (result as HandlerResponse).streamingHandler!(streamingMsgId, updateContentBlocksCallback, (status, eventData, responseType) => {
                 if (!status) return;
                 
                 
@@ -774,16 +910,21 @@ const updateMessageCallback = useCallback(
                   } catch {
                     errorText = eventData || 'Unknown error';
                   }
-                  setMessages(prev => prev.map(m => 
-                    m.id === streamingMsgId
-                      ? { 
-                          ...m,
-                          content: (m.content || '') + (errorText ? `\nError: ${errorText}` : ''),
-                          isError: true,
-                          isStreaming: false
-                        }
-                      : m
-                  ));
+                  setMessages(prev => prev.map(m => {
+                    if (m.id === streamingMsgId) {
+                      const existingText = Array.isArray(m.content) 
+                        ? m.content.filter(b => b.type === 'text').map(b => (b.data as any).text).join('\n')
+                        : '';
+                      const errorBlock = createTextBlock(`error_${streamingMsgId}`, errorText ? `Error: ${errorText}` : 'Error occurred', false);
+                      return {
+                        ...m,
+                        content: existingText ? [createTextBlock(`text_${streamingMsgId}`, existingText, false), errorBlock] : [errorBlock],
+                        messageStatus: 'error' as const,
+                        isStreaming: false
+                      };
+                    }
+                    return m;
+                  }));
                   return;
                 }
 
@@ -824,7 +965,7 @@ const updateMessageCallback = useCallback(
             } catch (streamErr) {
               setMessages(prev => prev.map(m => 
                 m.id === streamingMsgId
-                  ? { ...m, content: `Error: ${(streamErr as Error).message || 'Streaming failed'}`, isError: true, isStreaming: false }
+                  ? { ...m, content: [createTextBlock(`error_${streamingMsgId}`, `Error: ${(streamErr as Error).message || 'Streaming failed'}`, false)], messageStatus: 'error' as const, isStreaming: false }
                   : m
               ));
 
@@ -832,7 +973,7 @@ const updateMessageCallback = useCallback(
               setStreamingActive(false);
             }
           } else {
-          const messageContent = handleResponse(result as HandlerResponse);
+          const messageText = handleResponse(result as HandlerResponse);
           const backendId = (result as HandlerResponse).backendMessageId;
           const needsApproval = (result as HandlerResponse).needsApproval || false;
           const tempId = Date.now() + 1;
@@ -840,13 +981,24 @@ const updateMessageCallback = useCallback(
             const resultMessage: MessageType = {
             id: finalId,
             role: 'assistant',
-            content: messageContent,
+            content: messageText ? [createTextBlock(`text_${finalId}`, messageText, false)] : [],
             timestamp: new Date(),
             needsApproval: needsApproval,
             threadId: contextThreadId || currentThreadId || undefined
           };
           setMessages(prev => [...prev, resultMessage]);
-          await updateMessageFlags(messageId, { approved: true, needsApproval: false });
+          // Update blocks to approved status
+          if (Array.isArray(message.content)) {
+            const updatedContent = message.content.map(block => ({
+              ...block,
+              messageStatus: 'approved' as const,
+              needsApproval: false
+            }));
+            await updateMessageFlags(messageId, { content: updatedContent });
+          } else {
+            // For legacy messages without content blocks, use messageStatus
+            await updateMessageFlags(messageId, { messageStatus: 'approved' as const });
+          }
           }
         }
       }
@@ -855,24 +1007,46 @@ const updateMessageCallback = useCallback(
       const isTimeout = isTimeoutError(error as Error);
       
       if (isTimeout) {
-        
-        await updateMessageFlags(messageId, {
-          approved: false,
-          needsApproval: true, // Restore needsApproval since it failed
-          hasTimedOut: true, 
-          canRetry: true, 
-          retryAction: 'approve'
-        });
+        // Update blocks to restore needsApproval
+        if (Array.isArray(message.content)) {
+          const updatedContent = message.content.map(block => ({
+            ...block,
+            approved: false,
+            needsApproval: block.needsApproval !== false, // Restore if it was true
+            disapproved: false
+          }));
+          await updateMessageFlags(messageId, { 
+            content: updatedContent,
+            messageStatus: 'timeout'
+          });
+        } else {
+          // For legacy messages without content blocks, use messageStatus
+          await updateMessageFlags(messageId, {
+            messageStatus: 'timeout'
+          });
+        }
       } else {
+        // Update blocks to restore needsApproval
+        if (Array.isArray(message.content)) {
+          const updatedContent = message.content.map(block => ({
+            ...block,
+            approved: false,
+            needsApproval: block.needsApproval !== false, // Restore if it was true
+            disapproved: false
+          }));
+          await updateMessageFlags(messageId, { content: updatedContent });
+        } else {
+          // For legacy messages without content blocks, use messageStatus
+          await updateMessageFlags(messageId, { messageStatus: 'pending' });
+        }
         
-        await updateMessageFlags(messageId, { approved: false, needsApproval: true });
-        
+        const errorMessageId = Date.now() + 1;
         const errorMessage: MessageType = {
-          id: Date.now() + 1,
+          id: errorMessageId,
           role: 'assistant',
-          content: `Error during approval: ${(error as Error).message || 'Something went wrong'}`,
+          content: [createTextBlock(`error_${errorMessageId}`, `Error during approval: ${(error as Error).message || 'Something went wrong'}`, false)],
           timestamp: new Date(),
-          isError: true
+          messageStatus: 'error'
         };
 
         setMessages(prev => [...prev, errorMessage]);
@@ -907,20 +1081,39 @@ const updateMessageCallback = useCallback(
     setExecutionStatus('running');
     setLoading(true);
 
-    // Update message to show it's cancelled
-    await updateMessageFlags(message.id, { disapproved: true, needsApproval: false });
+    // Update blocks to show they're cancelled
+    if (Array.isArray(message.content)) {
+      const updatedContent = message.content.map(block => ({
+        ...block,
+        messageStatus: 'rejected' as const,
+        needsApproval: false
+      }));
+      await updateMessageFlags(message.id, { content: updatedContent });
+    } else {
+      // For legacy messages without content blocks, use messageStatus
+      await updateMessageFlags(message.id, { messageStatus: 'rejected' as const });
+    }
 
     try {
       // Call parent cancel handler
       if (onCancel) {
-        const result = await onCancel(message.content, message);
+        // Extract text content from content blocks for onCancel
+        const textContent = Array.isArray(message.content) 
+          ? message.content
+              .filter(block => block.type === 'text')
+              .map(block => (block.data as any).text)
+              .join('\n')
+          : message.content;
+        const result = await onCancel(textContent, message);
         
         // If the cancel handler returns a result, add it as a new message
         if (result) {
+          const resultMessageId = Date.now() + 1;
+          const resultText = typeof result === 'string' ? result : (result as HandlerResponse).message || '';
           const resultMessage: MessageType = {
-            id: Date.now() + 1,
+            id: resultMessageId,
             role: 'assistant',
-            content: result,
+            content: resultText ? [createTextBlock(`text_${resultMessageId}`, resultText, false)] : [],
             timestamp: new Date(),
             needsApproval: false // Cancellation messages don't need approval
           };
@@ -930,12 +1123,13 @@ const updateMessageCallback = useCallback(
       }
     } catch (error) {
       // Add error message if cancellation fails
+      const errorMessageId = Date.now() + 1;
       const errorMessage: MessageType = {
-        id: Date.now() + 1,
+        id: errorMessageId,
         role: 'assistant',
-        content: `Error during cancellation: ${(error as Error).message || 'Something went wrong'}`,
+        content: [createTextBlock(`error_${errorMessageId}`, `Error during cancellation: ${(error as Error).message || 'Something went wrong'}`, false)],
         timestamp: new Date(),
-        isError: true
+        messageStatus: 'error' as const
       };
 
       setMessages(prev => [...prev, errorMessage]);
@@ -946,16 +1140,14 @@ const updateMessageCallback = useCallback(
 
   const handleRetry = async (messageId: number): Promise<void> => {
     const message = messages.find(m => m.id === messageId);
-    if (!message || !message.canRetry || !message.retryAction) {
+    // Check if message has timeout status (can be retried)
+    if (!message || message.messageStatus !== 'timeout') {
       return;
     }
 
-
-    // Clear the timeout state and restore the message to its pre-timeout state
+    // Clear the timeout state and restore the message to pending status
     await updateMessageFlags(messageId, {
-      hasTimedOut: false, 
-      canRetry: false, 
-      retryAction: undefined 
+      messageStatus: 'pending' as const
     });
 
     try {
@@ -966,12 +1158,13 @@ const updateMessageCallback = useCallback(
         // If the retry handler returns a result, add it as a new message
         if (result) {
           // Handle response (could be string or HandlerResponse)
-          const messageContent = handleResponse(result);
+          const messageText = handleResponse(result);
+          const resultMessageId = Date.now() + 1;
           
           const resultMessage: MessageType = {
-            id: Date.now() + 1,
+            id: resultMessageId,
             role: 'assistant',
-            content: messageContent,
+            content: messageText ? [createTextBlock(`text_${resultMessageId}`, messageText, false)] : [],
             timestamp: new Date(),
             threadId: contextThreadId || currentThreadId || undefined
           };
@@ -980,56 +1173,27 @@ const updateMessageCallback = useCallback(
         }
       } else {
         // Fallback to local retry logic if no parent handler
-        if (message.retryAction === 'approve') {
-          await handleApprove(messageId);
-        } else if (message.retryAction === 'feedback') {
-          // For feedback retry, we need to provide feedback content
-          // Since we don't have the original feedback content, we'll use a generic message
-          if (onFeedback) {
-            const result = await onFeedback('Retrying previous action', message);
-            if (result) {
-              const messageContent = handleResponse(result as HandlerResponse);
-              const needsApproval = (result as HandlerResponse).needsApproval || false;
-              const backendId = (result as HandlerResponse).backendMessageId;
-              const tempId = Date.now() + 1;
-              const finalId = backendId !== undefined && backendId !== null ? backendId : tempId;
-              
-              const resultMessage: MessageType = {
-                id: finalId,
-                role: 'assistant',
-                content: messageContent,
-                timestamp: new Date(),
-                needsApproval: needsApproval,
-                threadId: contextThreadId || currentThreadId || undefined
-              };
-              
-              setMessages(prev => [...prev, resultMessage]);
-              if (needsApproval) {
-                setPendingApproval(resultMessage.id);
-              }
-            }
-          }
-        }
+        // For timeout retries, we'll try to approve the message
+        await handleApprove(messageId);
       }
     } catch (error) {
       const isTimeout = isTimeoutError(error as Error);
       
       // If retry fails, mark the message as having a timeout error again
       await updateMessageFlags(messageId, {
-        hasTimedOut: true, 
-        canRetry: true,
-        retryAction: message.retryAction // Preserve the original retry action
+        messageStatus: 'timeout' as const
       });
       console.error('Retry failed:', error);
       
       // Also show the error message if it's not a timeout
       if (!isTimeout) {
+        const errorMessageId = Date.now() + 1;
         const errorMessage: MessageType = {
-          id: Date.now() + 1,
+          id: errorMessageId,
           role: 'assistant',
-          content: `Retry failed: ${(error as Error).message || 'Something went wrong'}`,
+          content: [createTextBlock(`error_${errorMessageId}`, `Retry failed: ${(error as Error).message || 'Something went wrong'}`, false)],
           timestamp: new Date(),
-          isError: true
+          messageStatus: 'error' as const
         };
         setMessages(prev => [...prev, errorMessage]);
       }
@@ -1098,6 +1262,7 @@ const updateMessageCallback = useCallback(
       
       {/* Messages - scrollable area with padding for fixed input and header */}
       <div 
+        ref={messagesContainerRef}
         className={`flex-1 space-y-4 min-h-0 pb-40 overflow-y-auto slim-scroll ${threadTitle ? 'pt-38' : 'pt-8'}`}
       >
         <div className="max-w-3xl mx-auto px-4">

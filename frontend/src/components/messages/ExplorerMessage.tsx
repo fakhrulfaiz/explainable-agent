@@ -2,11 +2,13 @@ import React from 'react';
 
 interface ExplorerMessageProps {
   data?: any;
+  checkpointId?: string;
   onOpenExplorer?: () => void;
 }
 
 export const ExplorerMessage: React.FC<ExplorerMessageProps> = ({  
   data, 
+  checkpointId,
   onOpenExplorer
 }) => {
   const getSummary = () => {

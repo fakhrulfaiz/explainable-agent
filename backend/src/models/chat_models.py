@@ -1,30 +1,53 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional, Literal
+from pydantic import BaseModel, Field, validator
+from typing import List, Optional, Literal, Dict, Any
 from datetime import datetime
 from bson import ObjectId
+import warnings
+
+
+class MessageContent(BaseModel):
+    """Individual content block for a message"""
+    message_id: int = Field(..., description="Foreign key to messages collection")
+    block_id: str = Field(..., description="Unique block identifier")
+    type: str = Field(..., description="Block type: text, tool_calls, explorer, visualizations")
+    needs_approval: bool = Field(default=False, description="Whether this block needs approval")
+    message_status: Optional[Literal["pending", "approved", "rejected", "error", "timeout"]] = Field(default=None, description="Status of this content block")
+    data: Dict[str, Any] = Field(..., description="Block data content")
+    created_at: datetime = Field(default_factory=datetime.now, description="Block creation timestamp")
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 
 class ChatMessage(BaseModel):
     """Individual chat message"""
     thread_id: Optional[str] = Field(None, description="Thread ID for this message")
     sender: Literal["user", "assistant"] = Field(..., description="Message sender")
-    content: str = Field(..., description="Message content")
+    content: List[Dict[str, Any]] = Field(default_factory=list, description="Message content blocks (loaded from message_content collection)")
     timestamp: datetime = Field(default_factory=datetime.now, description="Message timestamp")
-    message_type: Literal["message", "explorer", "visualization"] = Field(default="message", description="Message type - message, explorer, visualization")
+    message_type: Optional[Literal["message", "explorer", "visualization", "structured"]] = Field(default="structured", description="Message type")
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
     user_id: Optional[str] = Field(None, description="User ID who owns this message")
     
-    # Additional fields from frontend Message interface
-    message_id: int = Field(..., description="Message ID from frontend")
-    needs_approval: Optional[bool] = Field(None, description="Whether message needs approval")
-    approved: Optional[bool] = Field(None, description="Whether message is approved")
-    disapproved: Optional[bool] = Field(None, description="Whether message is disapproved")
-    is_error: Optional[bool] = Field(None, description="Whether message is an error")
-    is_feedback: Optional[bool] = Field(None, description="Whether message is feedback")
-    has_timed_out: Optional[bool] = Field(None, description="Whether message has timed out")
-    can_retry: Optional[bool] = Field(None, description="Whether message can be retried")
-    retry_action: Optional[Literal["approve", "feedback", "cancel"]] = Field(None, description="Retry action type")
+    # Message ID
+    message_id: int = Field(..., description="Message ID")
+    
+    # Message status
+    message_status: Optional[Literal["pending", "approved", "rejected", "error", "timeout"]] = Field(None, description="Message status")
 
+    @validator('message_type', pre=True, always=True)
+    def validate_message_type(cls, v, values):
+        """Validate and auto-determine message_type based on content"""
+        content = values.get('content', [])
+        
+        # If content exists and has blocks, determine type from blocks
+        if content and isinstance(content, list) and len(content) > 0:
+            return "structured"
+        
+        # Fallback to provided value or default
+        return v or "structured"
     
     class Config:
         json_encoders = {
@@ -78,21 +101,29 @@ class AddMessageRequest(BaseModel):
     """Request to add message to existing thread"""
     thread_id: str = Field(..., description="Thread ID")
     sender: Literal["user", "assistant"] = Field(..., description="Message sender")
-    content: str = Field(..., description="Message content")
-    message_type: Literal["message", "explorer", "visualization"] = Field(default="message", description="Message type - message, explorer, visualization")
+    content: List[Dict[str, Any]] = Field(default_factory=list, description="Message content blocks")
+    message_type: Optional[Literal["message", "explorer", "visualization", "structured"]] = Field(default="structured", description="Message type")
     checkpoint_id: Optional[str] = Field(None, description="Checkpoint ID for explorer messages to fetch step data")
     
-    # Additional fields from frontend Message interface
-    message_id: int = Field(..., description="Message ID from frontend")
-    needs_approval: Optional[bool] = Field(None, description="Whether message needs approval")
-    approved: Optional[bool] = Field(None, description="Whether message is approved")
-    disapproved: Optional[bool] = Field(None, description="Whether message is disapproved")
-    is_error: Optional[bool] = Field(None, description="Whether message is an error")
-    is_feedback: Optional[bool] = Field(None, description="Whether message is feedback")
-    has_timed_out: Optional[bool] = Field(None, description="Whether message has timed out")
-    can_retry: Optional[bool] = Field(None, description="Whether message can be retried")
-    retry_action: Optional[Literal["approve", "feedback", "cancel"]] = Field(None, description="Retry action type")
+    # Message ID
+    message_id: int = Field(..., description="Message ID")
+    
+    # Message status
+    message_status: Optional[Literal["pending", "approved", "rejected", "error", "timeout"]] = Field(None, description="Message status")
+    
     metadata: Optional[dict] = Field(None, description="Additional metadata")
+
+    @validator('message_type', pre=True, always=True)
+    def validate_message_type(cls, v, values):
+        """Validate and auto-determine message_type based on content"""
+        content = values.get('content', [])
+        
+        # If content exists and has blocks, determine type from blocks
+        if content and isinstance(content, list) and len(content) > 0:
+            return "structured"
+        
+        # Fallback to provided value or default
+        return v or "structured"
 
 
 class ChatHistoryResponse(BaseModel):

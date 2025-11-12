@@ -97,8 +97,9 @@ class ExplainableAgent:
                 "- For general conversation: Respond normally without transferring\n\n"
                 "TRANSFER RULES:\n"
                 "- IMPORTANT: Only route to agents when you receive a NEW user message, not for agent responses\n"
-                "- CRITICAL: ONLY USE ONE TOOL CALL PER USER MESSAGE for transfers. PASS THE FULL TASK IN A SINGLE CALL.\n"
-                "- Example: If user asks for '3 different charts', call the transfer tool ONCE with the full request\n"
+                "- **CRITICAL: ONLY USE ONE TOOL CALL PER USER MESSAGE for transfers. PASS THE FULL TASK IN A SINGLE CALL.**\n"
+                "- **Example: If user asks for '3 different charts', call the transfer tool ONCE with the full request**\n"
+                "- **Example: If user asks for different objects or parameters, call the transfer tool ONCE with the full request**\n"
                 "- For mixed queries, handle preferences first, then transfer only the non-preference part\n\n"
                 "EXAMPLES:\n"
                 "- 'Call me Sarah' → Use update_user_name, confirm, no transfer\n"
@@ -432,10 +433,21 @@ RESPONSE STYLE:
         
         # 3. DATABASE QUERY GUIDELINES
         db_guidelines = """DATABASE OPERATIONS:
-- List tables when asked "what tables exist"
-- Return data in markdown tables for regular queries
-- DO NOT make up data if tables/columns don't exist - just say so
-- Ask clarifying questions if the request is ambiguous
+
+You are an agent designed to interact with a SQL database.
+Given an input question, create a syntactically correct sqlite query to run, then look at the results of the query and return the answer.
+Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
+You can order the results by a relevant column to return the most interesting examples in the database.
+Never query for all the columns from a specific table, only ask for the relevant columns given the question.
+You have access to tools for interacting with the database.
+Only use the below tools. Only use the information returned by the below tools to construct your final answer.
+You MUST double check your query before executing it. If you get an error while executing a query, rewrite the query and try again.
+
+DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
+
+To start you should ALWAYS look at the tables in the database to see what you can query.
+Do NOT skip this step.
+Then you should query the schema of the most relevant tabl
 """
         
         # 4. VISUALIZATION RULES
@@ -456,6 +468,7 @@ RESPONSE STYLE:
 - For visualizations: only call smart_transform_for_viz tool, don't generate images
 - For user-provided image URLs from database: use markdown format ![Alt](url)
 - Keep explanations brief and relevant
+
 """
         
         # 7. INTERACTION GUIDELINES
@@ -676,7 +689,7 @@ Guidelines:
         user_preferences = self._get_user_preferences()
         
         # Generate explanation with full context
-        system_prompt = f"""{user_preferences}
+        system_prompt = f"""
 
 Provide a concise, user-facing explanation (1–2 sentences) of the next step you will take to answer the question.
 

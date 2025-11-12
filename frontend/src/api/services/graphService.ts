@@ -145,14 +145,19 @@ export class GraphService {
       }
     }, 5000);
     
-    // Handle token events (content streaming)
-    eventSource.addEventListener('token', (event) => {
+    // Handle content_block events (new structured content)
+    eventSource.addEventListener('content_block', (event) => {
       try {
         lastHeartbeat = Date.now(); // Update heartbeat
-        const data = JSON.parse(event.data);
-        onMessageCallback({ content: data.content, node: data.node, type: data.type });
+        const blockData = JSON.parse(event.data);
+        // Pass the content_block event to the callback with a special status
+        onMessageCallback({ 
+          status: 'content_block', 
+          eventData: event.data,
+          blockData: blockData
+        });
       } catch (error) {
-        console.error("❌ Error parsing token event:", error, "Raw data:", event.data);
+        console.error("❌ Error parsing content_block event:", error, "Raw data:", event.data);
         onErrorCallback(error as Error);
       }
     });

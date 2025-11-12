@@ -21,11 +21,11 @@ async def clear_previous_approvals(thread_id: str, message_service: 'MessageMana
         message_service: The message management service instance
     """
     try:
-        # Use targeted query to get only messages that need approval
+        # Use targeted query to get only messages that need approval (status = pending)
         filter_criteria = {
             "thread_id": thread_id,
             "sender": "assistant", 
-            "needs_approval": True
+            "message_status": "pending"
         }
         
         # Get only messages that need approval (much more efficient)
@@ -33,14 +33,14 @@ async def clear_previous_approvals(thread_id: str, message_service: 'MessageMana
             filter_criteria=filter_criteria
         )
         
-        # Clear approval flags from previous messages
+        # Clear approval status from previous messages by setting to approved
         for msg in approval_messages:
             await message_service.update_message_status(
                 thread_id=thread_id,
                 message_id=msg.message_id,
-                needs_approval=False
+                message_status="approved"
             )
-            logger.info(f"Cleared needs_approval from message {msg.message_id}")
+            logger.info(f"Cleared pending status from message {msg.message_id}")
             
     except Exception as e:
         logger.warning(f"Failed to clear previous approval flags: {e}")

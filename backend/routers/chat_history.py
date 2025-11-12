@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
-from typing import Optional
+from typing import Optional, Literal
 from src.services.chat_history_service import ChatHistoryService
 from src.services.message_management_service import MessageManagementService
 from src.repositories.dependencies import get_chat_history_service, get_message_management_service
@@ -146,53 +146,8 @@ async def delete_chat_thread(
         logger.error(f"Error deleting chat thread {thread_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-class UpdateMessageFlagsRequest(BaseModel):
-    message_id: int
-    needs_approval: Optional[bool] = None
-    approved: Optional[bool] = None
-    disapproved: Optional[bool] = None
-    is_error: Optional[bool] = None
-    is_feedback: Optional[bool] = None
-    has_timed_out: Optional[bool] = None
-    can_retry: Optional[bool] = None
-    retry_action: Optional[str] = None
-
-
-@router.put("/thread/{thread_id}/message/flags", response_model=dict)
-async def update_message_flags(
-    thread_id: str,
-    request: UpdateMessageFlagsRequest,
-    chat_service: ChatHistoryService = Depends(get_chat_history_service)
-):
-    try:
-        success = await chat_service.update_message_flags(
-            thread_id=thread_id,
-            message_id=request.message_id,
-            needs_approval=request.needs_approval,
-            approved=request.approved,
-            disapproved=request.disapproved,
-            is_error=request.is_error,
-            is_feedback=request.is_feedback,
-            has_timed_out=request.has_timed_out,
-            can_retry=request.can_retry,
-            retry_action=request.retry_action,
-        )
-        if not success:
-            raise HTTPException(status_code=404, detail="Message not found or not modified")
-        
-        # Get the updated message to return it
-        updated_message = await chat_service.get_message_by_id(thread_id, request.message_id)
-        
-        return {
-            "success": True, 
-            "message": "Message flags updated",
-            "updated_message": updated_message
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating message flags for thread {thread_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Legacy endpoint removed - use block-level approval endpoint instead
+# PUT /thread/{thread_id}/message/{message_id}/block/{block_id}/approval
 
 
 @router.post("/thread/{thread_id}/restore", response_model=ChatHistoryResponse)
@@ -228,14 +183,8 @@ async def restore_chat_thread(
 # Message Status Synchronization Endpoints
 
 class MessageStatusUpdateRequest(BaseModel):
-    needs_approval: Optional[bool] = None
-    approved: Optional[bool] = None
-    disapproved: Optional[bool] = None
-    is_error: Optional[bool] = None
-    is_feedback: Optional[bool] = None
-    has_timed_out: Optional[bool] = None
-    can_retry: Optional[bool] = None
-    retry_action: Optional[str] = None
+    """Update message-level status (deprecated - use block-level status instead)"""
+    message_status: Optional[Literal["pending", "approved", "rejected", "error", "timeout"]] = None
 
 
 @router.put("/thread/{thread_id}/message/{message_id}/status", response_model=dict)
@@ -246,8 +195,8 @@ async def update_message_status(
     message_service: MessageManagementService = Depends(get_message_management_service)
 ):
     """
-    Update message status flags. This endpoint allows the frontend to sync
-    message status with the backend for consistency.
+    Update message-level status (deprecated - use block-level approval endpoint instead).
+    This endpoint is kept for backward compatibility but should not be used for new code.
     """
     try:
         # Convert request to dict, excluding None values
@@ -328,16 +277,10 @@ async def get_messages_status(
                 "message_id": message.message_id,
                 "sender": message.sender,
                 "timestamp": message.timestamp.isoformat(),
-                "needs_approval": message.needs_approval,
-                "approved": message.approved,
-                "disapproved": message.disapproved,
-                "is_error": message.is_error,
-                "is_feedback": message.is_feedback,
-                "has_timed_out": message.has_timed_out,
-                "can_retry": message.can_retry,
-                "retry_action": message.retry_action,
+                "message_status": message.message_status,
                 "message_type": message.message_type,
-                "checkpoint_id": message.checkpoint_id
+                "checkpoint_id": message.checkpoint_id,
+                "has_content_blocks": bool(message.content and len(message.content) > 0)
             })
         
         return {
@@ -348,4 +291,52 @@ async def get_messages_status(
         }
     except Exception as e:
         logger.error(f"Error getting message status for thread {thread_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BlockStatusUpdateRequest(BaseModel):
+    """Request to update block-level status"""
+    needsApproval: Optional[bool] = None
+    messageStatus: Optional[Literal["pending", "approved", "rejected", "error", "timeout"]] = None
+
+
+@router.put("/thread/{thread_id}/message/{message_id}/block/{block_id}/approval", response_model=dict)
+async def update_block_approval(
+    thread_id: str,
+    message_id: int,
+    block_id: str,
+    request: BlockStatusUpdateRequest,
+    message_service: MessageManagementService = Depends(get_message_management_service)
+):
+    """
+    Update block-level approval status. This endpoint allows the frontend to update
+    individual block approval status within a message's content_blocks.
+    """
+    try:
+        # Convert request to dict, excluding None values
+        status_updates = {k: v for k, v in request.dict().items() 
+                         if v is not None}
+        
+        if not status_updates:
+            raise HTTPException(status_code=400, detail="No valid block status updates provided")
+        
+        success = await message_service.update_block_status(
+            thread_id=thread_id,
+            message_id=message_id,
+            block_id=block_id,
+            **status_updates
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Block not found or not modified")
+        
+        return {
+            "success": True,
+            "message": "Block status updated successfully",
+            "updated_fields": list(status_updates.keys())
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating block status for thread {thread_id}, message {message_id}, block {block_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

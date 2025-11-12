@@ -2,11 +2,13 @@ import React from 'react';
 
 interface VisualizationMessageProps {
   charts?: any[];
+  checkpointId?: string;
   onOpenVisualization?: () => void;
 }
 
 export const VisualizationMessage: React.FC<VisualizationMessageProps> = ({  
   charts, 
+  checkpointId,
   onOpenVisualization,  
 }) => {
   const getSummary = () => {

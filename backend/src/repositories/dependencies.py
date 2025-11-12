@@ -4,6 +4,7 @@ from pymongo.database import Database
 from src.models.database import get_mongodb
 from .chat_thread_repository import ChatThreadRepository
 from .checkpoint_repository import CheckpointWriteRepository, CheckpointRepository
+from .message_content_repository import MessageContentRepository
 from src.services.chat_history_service import ChatHistoryService
 from src.services.checkpoint_service import CheckpointService
 from src.services.message_management_service import MessageManagementService
@@ -34,6 +35,12 @@ async def get_messages_repository(db: Database = Depends(get_mongodb)) -> Messag
     await repo.ensure_indexes()
     return repo
 
+async def get_message_content_repository(db: Database = Depends(get_mongodb)) -> MessageContentRepository:
+    """Dependency to get MessageContentRepository"""
+    repo = MessageContentRepository(db)
+    await repo.ensure_indexes()
+    return repo
+
 
 # Service Dependencies (using repositories)
 async def get_checkpoint_service(
@@ -45,13 +52,15 @@ async def get_checkpoint_service(
 async def get_chat_history_service(
     chat_thread_repo: ChatThreadRepository = Depends(get_chat_thread_repository),
     checkpoint_service = Depends(get_checkpoint_service),
-    messages_repo: MessagesRepository = Depends(get_messages_repository)
+    messages_repo: MessagesRepository = Depends(get_messages_repository),
+    message_content_repo: MessageContentRepository = Depends(get_message_content_repository)
 ):
-    return ChatHistoryService(chat_thread_repo, checkpoint_service, messages_repo)
+    return ChatHistoryService(chat_thread_repo, checkpoint_service, messages_repo, message_content_repo)
 
 async def get_message_management_service(
     messages_repo: MessagesRepository = Depends(get_messages_repository),
-    chat_thread_repo: ChatThreadRepository = Depends(get_chat_thread_repository)
+    chat_thread_repo: ChatThreadRepository = Depends(get_chat_thread_repository),
+    message_content_repo: MessageContentRepository = Depends(get_message_content_repository)
 ):
-    return MessageManagementService(messages_repo, chat_thread_repo)
+    return MessageManagementService(messages_repo, chat_thread_repo, message_content_repo)
 

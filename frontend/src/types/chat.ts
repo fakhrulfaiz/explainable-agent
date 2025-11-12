@@ -1,18 +1,48 @@
+// Content block types for structured messages
+export interface TextContent {
+  text: string;
+}
+
+export interface ToolCallsContent {
+  toolCalls: Array<{
+    name: string;
+    input: any;
+    output?: any;
+    status: 'pending' | 'approved' | 'rejected';
+  }>;
+  content?: string; // Tool explanation text from tool_explanation node
+}
+
+
+export interface ExplorerContent {
+  checkpointId: string;
+  explorerData?: any; // Optional cached data
+}
+
+export interface VisualizationsContent {
+  checkpointId: string;
+  visualizations?: any[]; // Optional cached data
+}
+
+export interface ContentBlock {
+  id: string;
+  type: 'text' | 'tool_calls' | 'explorer' | 'visualizations';
+  needsApproval?: boolean;
+  messageStatus?: 'pending' | 'approved' | 'rejected' | 'error' | 'timeout';
+  data: TextContent | ToolCallsContent | ExplorerContent | VisualizationsContent;
+}
+
 export interface Message {
   id: number;
   role: 'user' | 'assistant';
-  content: string;
+  // Content is always an array of content blocks
+  content: ContentBlock[];
   timestamp: Date;
   needsApproval?: boolean;
-  approved?: boolean;
-  disapproved?: boolean;
-  isError?: boolean;
-  isFeedback?: boolean;
+  messageStatus?: 'pending' | 'approved' | 'rejected' | 'error' | 'timeout';
   isStreaming?: boolean;
-  hasTimedOut?: boolean;
-  canRetry?: boolean;
-  retryAction?: 'approve' | 'feedback' | 'cancel';
   threadId?: string;
+  // Deprecated: keeping for backward compatibility during transition
   messageType?: 'message' | 'explorer' | 'visualization' | 'tool_call';
   checkpointId?: string;
   metadata?: {
@@ -29,6 +59,49 @@ export interface Message {
   };
 }
 
+// Helper functions for content blocks
+export const createTextBlock = (id: string, text: string, needsApproval?: boolean): ContentBlock => ({
+  id,
+  type: 'text',
+  needsApproval,
+  data: { text }
+});
+
+export const createToolCallsBlock = (id: string, toolCalls: ToolCallsContent['toolCalls'], needsApproval?: boolean): ContentBlock => ({
+  id,
+  type: 'tool_calls',
+  needsApproval,
+  data: { toolCalls }
+});
+
+
+export const createExplorerBlock = (id: string, checkpointId: string, needsApproval?: boolean, explorerData?: any): ContentBlock => ({
+  id,
+  type: 'explorer',
+  needsApproval,
+  data: { checkpointId, explorerData }
+});
+
+export const createVisualizationsBlock = (id: string, checkpointId: string, needsApproval?: boolean, visualizations?: any[]): ContentBlock => ({
+  id,
+  type: 'visualizations',
+  needsApproval,
+  data: { checkpointId, visualizations }
+});
+
+// Type guards for content blocks
+export const isTextBlock = (block: ContentBlock): block is ContentBlock & { data: TextContent } => 
+  block.type === 'text';
+
+export const isToolCallsBlock = (block: ContentBlock): block is ContentBlock & { data: ToolCallsContent } => 
+  block.type === 'tool_calls';
+
+export const isExplorerBlock = (block: ContentBlock): block is ContentBlock & { data: ExplorerContent } => 
+  block.type === 'explorer';
+
+export const isVisualizationsBlock = (block: ContentBlock): block is ContentBlock & { data: VisualizationsContent } => 
+  block.type === 'visualizations';
+
 // Response object that handlers can return
 export interface HandlerResponse {
   message: string;
@@ -44,8 +117,8 @@ export interface HandlerResponse {
   isStreaming?: boolean;
   streamingHandler?: (
     streamingMessageId: number, 
-    updateMessageCallback: (id: number, content: string) => void,
-    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result' | 'completed_payload' | 'visualizations_ready', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void
+    updateContentCallback: (id: number, contentBlocks: ContentBlock[]) => void,
+    onStatus?: (status: 'user_feedback' | 'finished' | 'running' | 'error' | 'tool_call' | 'tool_result' | 'completed_payload' | 'visualizations_ready' | 'content_block', eventData?: string, responseType?: 'answer' | 'replan' | 'cancel') => void
   ) => Promise<void>;
 }
 

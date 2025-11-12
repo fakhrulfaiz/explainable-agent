@@ -1,11 +1,10 @@
 import React from 'react';
 import { MessageComponentProps } from '../types/chat';
 import { MessageRenderer } from './MessageRenderer';
-import { RotateCcw } from 'lucide-react';
 
 const Message: React.FC<MessageComponentProps> = ({ 
   message,
-  onRetry
+  onRetry: _onRetry
 }) => {
   const handleAction = (action: string, data?: any) => {
     switch (action) {
@@ -22,15 +21,11 @@ const Message: React.FC<MessageComponentProps> = ({
     }
   };
  
-  if (message.messageType === 'explorer' || message.messageType === 'visualization' || message.messageType === 'tool_call') {
-    return (
-      <div className="w-full mb-4">
-        <MessageRenderer message={message} onAction={handleAction} />
-      </div>
-    );
-  }
 
-  if (!message.content || message.content.trim().length === 0) {
+  // Check if message has content (always an array of content blocks)
+  const hasContent = message.content && message.content.length > 0;
+    
+  if (!hasContent) {
     return null;
   }
   // Regular message layout
@@ -46,13 +41,13 @@ const Message: React.FC<MessageComponentProps> = ({
           </div>
         ) : (
           <div className={`px-4 py-3 ${
-            message.isError
+            message.messageStatus === 'error'
               ? 'bg-destructive/15 text-destructive border border-destructive/30'
-              : message.hasTimedOut
+              : message.messageStatus === 'timeout'
               ? 'bg-accent text-accent-foreground border border-border'
-              : message.approved
+              : message.messageStatus === 'approved'
               ? 'bg-accent text-accent-foreground border border-border'
-              : message.disapproved
+              : message.messageStatus === 'rejected'
               ? 'bg-muted text-muted-foreground border border-border'
             : 'bg-background text-foreground'
           }`}>
@@ -62,34 +57,21 @@ const Message: React.FC<MessageComponentProps> = ({
           </div>
         )}
 
-        {/* Retry button for timed-out messages */}
-        {message.hasTimedOut && message.canRetry && onRetry && (
-          <div className="mt-2">
-            <button
-              onClick={() => onRetry(message.id)}
-              className="flex items-center gap-1 px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 transition-colors"
-            >
-              <RotateCcw className="w-3 h-3" />
-              Retry {message.retryAction}
-            </button>
-          </div>
-        )}
-
         {/* Timestamp and status */}
         <div className={`text-xs text-muted-foreground mt-0.5 mb-2 ${
           message.role === 'user' ? 'text-right' : 'text-left'
         }`}>
-          {message.isFeedback && (
-            <span className="ml-2 text-blue-600 font-medium">Feedback</span>
-          )}
-          {message.approved && (
+          {message.messageStatus === 'approved' && (
             <span className="ml-2 text-green-600 font-medium">✓ Approved</span>
           )}
-          {message.disapproved && (
+          {message.messageStatus === 'rejected' && (
             <span className="ml-2 text-red-600 font-medium">Cancelled</span>
           )}
-          {message.hasTimedOut && (
+          {message.messageStatus === 'timeout' && (
             <span className="ml-2 text-orange-600 font-medium">Timed out</span>
+          )}
+          {message.messageStatus === 'error' && (
+            <span className="ml-2 text-red-600 font-medium">Error</span>
           )}
         </div>
       </div>

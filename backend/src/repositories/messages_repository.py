@@ -27,8 +27,7 @@ class MessagesRepository(BaseRepository[ChatMessage]):
             await self.collection.create_index([("thread_id", 1), ("sender", 1), ("timestamp", -1)], name="idx_thread_sender_timestamp")
             
             # Status-based filtering indexes for message management
-            await self.collection.create_index([("thread_id", 1), ("needs_approval", 1)], name="idx_thread_approval")
-            await self.collection.create_index([("thread_id", 1), ("is_error", 1)], name="idx_thread_error")
+            await self.collection.create_index([("thread_id", 1), ("message_status", 1)], name="idx_thread_status")
             await self.collection.create_index([("thread_id", 1), ("message_type", 1)], name="idx_thread_message_type")
             
             # Performance indexes for common queries

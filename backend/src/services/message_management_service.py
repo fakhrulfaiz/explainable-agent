@@ -6,6 +6,7 @@ from datetime import datetime
 
 from src.repositories.messages_repository import MessagesRepository
 from src.repositories.chat_thread_repository import ChatThreadRepository
+from src.repositories.message_content_repository import MessageContentRepository
 from src.models.chat_models import ChatMessage, AddMessageRequest
 # Retry and circuit breaker utilities removed for simpler development
 
@@ -19,26 +20,28 @@ class MessageManagementService:
     
     def __init__(self, 
                  messages_repo: MessagesRepository,
-                 chat_thread_repo: ChatThreadRepository):
+                 chat_thread_repo: ChatThreadRepository,
+                 message_content_repo: MessageContentRepository):
         self.messages_repo = messages_repo
         self.chat_thread_repo = chat_thread_repo
+        self.message_content_repo = message_content_repo
     
     async def save_user_message(self, 
                                thread_id: str,
-                               content: str,
+                               content: Optional[Any] = None,  # Can be string or List[Dict]
                                message_id: Optional[int] = None,
-                               message_type: Literal["message", "explorer", "visualization"] = "message",
+                               message_type: Literal["message", "explorer", "visualization", "structured"] = "message",
+                               content_blocks: Optional[List[Dict[str, Any]]] = None,
                                metadata: Optional[dict] = None,
                                user_id: Optional[str] = None,
                                is_feedback: bool = False) -> ChatMessage:
         """
         Save a user message with proper validation and security checks.
         This is called when the backend receives a user message.
+        Content can be passed as array of blocks, or content_blocks parameter (for backward compatibility).
         """
         try:
-      
             thread = await self.chat_thread_repo.find_by_id(thread_id, "thread_id")
-
             
             if not thread:
                 raise ValueError(f"Thread {thread_id} not found")
@@ -52,39 +55,56 @@ class MessageManagementService:
                 message_id = int(time.time() * 1000000)  # Microsecond precision
                 logger.info(f"Generated message_id: {message_id} for thread {thread_id}")
             
-            # Sanitize and validate content
-            content = self._sanitize_content(content)
-            if not content.strip():
-                raise ValueError("Message content cannot be empty")
+            # Normalize content: use content_blocks if provided (backward compat), otherwise use content
+            # If content is a string, convert it to a text block
+            if content_blocks is not None:
+                blocks = content_blocks
+            elif content is not None:
+                if isinstance(content, str) and content.strip():
+                    # Convert string content to a text block
+                    blocks = [{
+                        "id": f"text_{message_id or int(time.time() * 1000)}",
+                        "type": "text",
+                        "needsApproval": False,
+                        "data": {"text": content}
+                    }]
+                elif isinstance(content, list):
+                    blocks = content
+                else:
+                    blocks = []
+            else:
+                blocks = []
             
-            # Create message object
+            # If blocks exist, determine message type
+            if blocks and message_type == "message":
+                message_type = "structured"
+            
+            # Create message object with empty content array (blocks stored separately)
             message = ChatMessage(
                 thread_id=thread_id,
                 sender="user",
-                content=content,
+                content=[],  # Always empty - blocks stored in message_content collection
                 timestamp=datetime.now(),
                 message_type=message_type,
                 message_id=message_id,
-                user_id=user_id,  # Include user_id
-                # User messages don't need approval by default
-                needs_approval=False,
-                approved=None,
-                disapproved=None,
-                is_error=False,
-                is_feedback=is_feedback,  # Set based on parameter
-                has_timed_out=False,
-                can_retry=False,
-                retry_action=None,
+                user_id=user_id,
+                message_status=None,
                 checkpoint_id=None
             )
             
             if user_id:
                 logger.info(f"Saving user message {message_id} to thread {thread_id} with user_id: {user_id}")
             
-            # Save to database
+            # Save message to database
             success = await self.messages_repo.add_message(message)
             if not success:
                 raise RuntimeError("Failed to save user message to database")
+            
+            # Save content blocks to message_content collection
+            if blocks:
+                await self.message_content_repo.add_content_blocks(message_id, blocks)
+                # Load blocks back into message for return value
+                message.content = await self.message_content_repo.get_blocks_by_message_id(message_id)
             
             logger.info(f"Successfully saved user message {message_id} to thread {thread_id}")
             return message
@@ -95,16 +115,18 @@ class MessageManagementService:
     
     async def save_assistant_message(self,
                                    thread_id: str,
-                                   content: str,
-                                   message_type: Literal["message", "explorer", "visualization"] = "message",
+                                   content: Optional[Any] = None,  # Can be string or List[Dict]
+                                   message_type: Literal["message", "explorer", "visualization", "structured"] = "message",
                                    checkpoint_id: Optional[str] = None,
                                    needs_approval: bool = False,
+                                   content_blocks: Optional[List[Dict[str, Any]]] = None,
                                    metadata: Optional[dict] = None,
                                    message_id: Optional[int] = None,
                                    user_id: Optional[str] = None) -> ChatMessage:
         """
         Save an assistant message. This is called by the backend during graph execution.
         Only the backend should create assistant messages for security.
+        Content can be passed as array of blocks, or content_blocks parameter (for backward compatibility).
         """
         try:
             # For assistant messages, we trust the backend - thread should exist since 
@@ -123,37 +145,58 @@ class MessageManagementService:
             if message_id is None:
                 message_id = int(time.time() * 1000000)
             
-            # Sanitize content
-            content = self._sanitize_content(content)
+            # Normalize content: use content_blocks if provided (backward compat), otherwise use content
+            # If content is a string, convert it to a text block
+            if content_blocks is not None:
+                blocks = content_blocks
+            elif content is not None:
+                if isinstance(content, str) and content.strip():
+                    # Convert string content to a text block
+                    blocks = [{
+                        "id": f"text_{message_id or int(time.time() * 1000)}",
+                        "type": "text",
+                        "needsApproval": False,
+                        "data": {"text": content}
+                    }]
+                elif isinstance(content, list):
+                    blocks = content
+                else:
+                    blocks = []
+            else:
+                blocks = []
             
-            # Create message object
+            # Determine message type based on content blocks
+            if blocks and message_type == "message":
+                message_type = "structured"
+            
+            # Create message object with empty content array (blocks stored separately)
             message = ChatMessage(
                 thread_id=thread_id,
                 sender="assistant",
-                content=content,
+                content=[],  # Always empty - blocks stored in message_content collection
                 timestamp=datetime.now(),
                 message_type=message_type,
                 message_id=message_id,
-                user_id=user_id,  # Include user_id
+                user_id=user_id,
                 checkpoint_id=checkpoint_id,
-                needs_approval=needs_approval,
-                approved=None,
-                disapproved=None,
-                is_error=False,
-                is_feedback=False,
-                has_timed_out=False,
-                can_retry=True if needs_approval else False,
-                retry_action="approve" if needs_approval else None,
+                # Only set status if needs_approval, otherwise leave as None
+                message_status="pending" if needs_approval else None,
                 metadata=metadata
             )
             
             if user_id:
                 logger.info(f"Saving assistant message {message_id} to thread {thread_id} with user_id: {user_id}")
             
-            # Save to database
+            # Save message to database
             success = await self.messages_repo.add_message(message)
             if not success:
                 raise RuntimeError("Failed to save assistant message to database")
+            
+            # Save content blocks to message_content collection
+            if blocks:
+                await self.message_content_repo.add_content_blocks(message_id, blocks)
+                # Load blocks back into message for return value
+                message.content = await self.message_content_repo.get_blocks_by_message_id(message_id)
             
             logger.info(f"Successfully saved assistant message {message_id} to thread {thread_id}")
             return message
@@ -175,10 +218,9 @@ class MessageManagementService:
             if not message:
                 raise ValueError(f"Message {message_id} not found in thread {thread_id}")
             
-            # Filter valid status fields
+            # Filter valid status fields - only message_status is supported now
             valid_fields = {
-                'needs_approval', 'approved', 'disapproved', 'is_error', 
-                'is_feedback', 'has_timed_out', 'can_retry', 'retry_action'
+                'message_status'
             }
             
             filtered_updates = {k: v for k, v in status_updates.items() if k in valid_fields}
@@ -208,24 +250,26 @@ class MessageManagementService:
                                message_id: int,
                                error_message: str = None) -> bool:
         """
-        Mark a message as having an error and optionally update content.
+        Mark a message as having an error and optionally add error block.
         """
         try:
+            # Update message status to error
             updates = {
-                'is_error': True,
-                'can_retry': True,
-                'retry_action': 'cancel'
+                'message_status': 'error'
             }
             
-            # If error message provided, update content
+            # If error message provided, add error block to content
             if error_message:
                 # Get current message to preserve original content
                 message = await self._get_message_by_id(thread_id, message_id)
                 if message:
-                    error_content = f"Error: {error_message}\n\nOriginal: {message.content}"
-                    await self.messages_repo.update_message_by_message_id(
-                        message_id, {'content': error_content}
-                    )
+                    error_block = {
+                        "id": f"error_{message_id}_{int(time.time() * 1000)}",
+                        "type": "text",
+                        "needsApproval": False,
+                        "data": {"text": f"Error: {error_message}"}
+                    }
+                    await self.message_content_repo.add_content_blocks(message_id, [error_block])
             
             return await self.update_message_status(thread_id, message_id, **updates)
             
@@ -243,17 +287,24 @@ class MessageManagementService:
         """
         Get messages for a thread with optional pagination and filtering.
         Enhanced with performance optimizations and filtering capabilities.
+        Content blocks are loaded from message_content collection.
         """
         try:
             # Use optimized repository method with filtering
             if sender_filter or message_type_filter or status_filter:
-                return await self._get_filtered_messages(
+                messages = await self._get_filtered_messages(
                     thread_id, limit, skip, sender_filter, message_type_filter, status_filter
                 )
+            else:
+                messages = await self.messages_repo.get_all_messages_by_thread(
+                    thread_id, limit=limit, skip=skip
+                )
             
-            return await self.messages_repo.get_all_messages_by_thread(
-                thread_id, limit=limit, skip=skip
-            )
+            # Load content blocks for each message
+            for message in messages:
+                message.content = await self.message_content_repo.get_blocks_by_message_id(message.message_id)
+            
+            return messages
         except Exception as e:
             logger.error(f"Error retrieving messages for thread {thread_id}: {e}")
             raise
@@ -267,6 +318,7 @@ class MessageManagementService:
                                    status_filter: Optional[Dict[str, bool]]) -> List[ChatMessage]:
         """
         Internal method for filtered message retrieval with optimized queries.
+        Content blocks are loaded separately.
         """
         # Build filter criteria for optimized database query
         filter_criteria = {"thread_id": thread_id}
@@ -279,55 +331,64 @@ class MessageManagementService:
         
         if status_filter:
             for status_key, status_value in status_filter.items():
-                if status_key in ['needs_approval', 'approved', 'disapproved', 'is_error', 'is_feedback']:
+                if status_key in ['message_status']:
                     filter_criteria[status_key] = status_value
         
         # Use repository's find_many method with optimized filters
-        return await self.messages_repo.find_many(
+        messages = await self.messages_repo.find_many(
             filter_criteria=filter_criteria,
             limit=limit,
             skip=skip,
             sort_criteria=[("timestamp", 1)]  # Chronological order
         )
+        
+        # Load content blocks for each message
+        for message in messages:
+            message.content = await self.message_content_repo.get_blocks_by_message_id(message.message_id)
+        
+        return messages
     
     async def get_last_message(self, thread_id: str) -> Optional[ChatMessage]:
         """
         Get the last message in a thread.
+        Content blocks are loaded from message_content collection.
         """
         try:
-            return await self.messages_repo.get_last_message_by_thread(thread_id)
+            message = await self.messages_repo.get_last_message_by_thread(thread_id)
+            if message:
+                message.content = await self.message_content_repo.get_blocks_by_message_id(message.message_id)
+            return message
         except Exception as e:
             logger.error(f"Error retrieving last message for thread {thread_id}: {e}")
             return None
     
-    def _sanitize_content(self, content: str) -> str:
+    def _sanitize_content(self, content: Any) -> Any:
         """
         Sanitize message content for security and consistency.
+        Handles both string content (legacy) and list of blocks.
         """
-        if not isinstance(content, str):
-            content = str(content)
-        
-        # Basic sanitization - remove null bytes and excessive whitespace
-        content = content.replace('\x00', '').strip()
-        
-        # Limit content length for security (10MB limit)
-        max_length = 10 * 1024 * 1024  # 10MB
-        if len(content) > max_length:
-            content = content[:max_length] + "... [truncated]"
-            logger.warning(f"Message content truncated to {max_length} characters")
+        if isinstance(content, str):
+            # Basic sanitization - remove null bytes and excessive whitespace
+            content = content.replace('\x00', '').strip()
+            
+            # Limit content length for security (10MB limit)
+            max_length = 10 * 1024 * 1024  # 10MB
+            if len(content) > max_length:
+                content = content[:max_length] + "... [truncated]"
+                logger.warning(f"Message content truncated to {max_length} characters")
         
         return content
     
     async def _get_message_by_id(self, thread_id: str, message_id: int) -> Optional[ChatMessage]:
         """
         Helper to get a specific message by ID within a thread.
+        Content blocks are loaded from message_content collection.
         """
         try:
-            messages = await self.messages_repo.get_all_messages_by_thread(thread_id)
-            for message in messages:
-                if message.message_id == message_id:
-                    return message
-            return None
+            message = await self.messages_repo.get_message_by_id(thread_id, message_id)
+            if message:
+                message.content = await self.message_content_repo.get_blocks_by_message_id(message_id)
+            return message
         except Exception as e:
             logger.error(f"Error finding message {message_id} in thread {thread_id}: {e}")
             return None
@@ -344,3 +405,43 @@ class MessageManagementService:
         except Exception as e:
             logger.error(f"Error validating message ownership: {e}")
             return False
+    
+    async def update_block_status(self,
+                                  thread_id: str,
+                                  message_id: int,
+                                  block_id: str,
+                                  **status_updates) -> bool:
+        """
+        Update block-level approval status in message_content collection.
+        Only backend should control these for security.
+        """
+        try:
+            # Validate the message exists and belongs to the thread
+            message = await self.messages_repo.get_message_by_id(thread_id, message_id)
+            if not message:
+                raise ValueError(f"Message {message_id} not found in thread {thread_id}")
+            
+            # Filter valid status fields for blocks
+            valid_fields = {
+                'needsApproval', 'messageStatus', 'message_status'
+            }
+            
+            filtered_updates = {k: v for k, v in status_updates.items() if k in valid_fields}
+            
+            if not filtered_updates:
+                logger.warning(f"No valid block status updates provided for block {block_id} in message {message_id}")
+                return False
+            
+            # Update the block in message_content collection
+            success = await self.message_content_repo.update_block(block_id, filtered_updates)
+            
+            if success:
+                logger.info(f"Updated block {block_id} status in message {message_id}: {filtered_updates}")
+            else:
+                logger.error(f"Failed to update block {block_id} status in message {message_id}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error updating block {block_id} status in message {message_id}: {e}")
+            raise
