@@ -57,8 +57,8 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
   onExpandedChange
 }) => {
   const isMobile = useIsMobile();
-  const [isExpanded, setIsExpanded] = useState(true); // Start expanded by default
-  const [hasInitialized, setHasInitialized] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false); 
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,15 +72,7 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
   });
   const { user, signOut } = useAuth();
 
-  // Initialize sidebar state on mount: collapsed on mobile, expanded on desktop
-  useEffect(() => {
-    if (!hasInitialized && typeof window !== 'undefined') {
-      setIsExpanded(!isMobile);
-      setHasInitialized(true);
-    }
-  }, [isMobile, hasInitialized]);
-
-  // Load threads on mount and when expanded
+  // Load threads on mount and when expanded
   useEffect(() => {
     if (threads.length === 0) {
       loadThreads();
@@ -101,11 +93,23 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
     }
   };
 
-  const toggleExpanded = () => {
-    const newState = !isExpanded;
-    setIsExpanded(newState);
-    onExpandedChange?.(newState);
-  };
+  const toggleExpanded = () => {
+    const newState = !isExpanded;
+    setIsExpanded(newState);
+    onExpandedChange?.(newState);
+  };
+
+  const handleSettingsClick = () => {
+    if (!isExpanded) {
+      // If sidebar is collapsed, expand it and open settings
+      setIsExpanded(true);
+      setIsSettingsOpen(true);
+      onExpandedChange?.(true);
+    } else {
+      // If sidebar is expanded, just toggle settings
+      setIsSettingsOpen(!isSettingsOpen);
+    }
+  };
 
   const handleThreadSelect = (threadId: string) => {
     onThreadSelect?.(threadId);
@@ -651,7 +655,7 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
 
           {/* Settings Collapsible */}
           {isExpanded ? (
-            <Collapsible className="w-full">
+            <Collapsible className="w-full" open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
               <CollapsibleTrigger
                 className="w-full h-10 flex items-center pl-3 bg-transparent hover:bg-accent rounded-md transition-colors"
                 title="Settings"
@@ -671,18 +675,20 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
                 <div className="border-t border-border my-1" />
                 <button
                   onClick={async () => { await signOut(); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground bg-transparent hover:bg-accent rounded"
+                  className="w-full h-10 flex items-center gap-2 px-3 text-sm text-muted-foreground hover:text-foreground bg-transparent hover:bg-accent rounded min-w-0"
                 >
-                  <LogOut className="w-4 h-4" />
-                  Sign out{user?.email ? ` (${user.email})` : ''}
+                  <LogOut className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate min-w-0 flex-1">
+                    Sign out{user?.email ? ` (${user.email})` : ''}
+                  </span>
                 </button>
               </CollapsibleContent>
             </Collapsible>
           ) : (
             <button
+              onClick={handleSettingsClick}
               className="w-full h-10 flex items-center pl-3 bg-transparent hover:bg-accent rounded-md transition-colors"
               title="Settings"
-              disabled
             >
               <Settings className="w-4 h-4 flex-shrink-0" />
             </button>

@@ -95,15 +95,38 @@ class MessageManagementService:
             if user_id:
                 logger.info(f"Saving user message {message_id} to thread {thread_id} with user_id: {user_id}")
             
-            # Save message to database
-            success = await self.messages_repo.add_message(message)
-            if not success:
-                raise RuntimeError("Failed to save user message to database")
-            
-            # Save content blocks to message_content collection
+            # Save content blocks to message_content collection FIRST
             if blocks:
-                await self.message_content_repo.add_content_blocks(message_id, blocks)
-                # Load blocks back into message for return value
+                try:
+                    await self.message_content_repo.add_content_blocks(message_id, blocks)
+                except Exception as e:
+                    logger.error(f"Failed to save content blocks for message {message_id}: {e}")
+                    raise RuntimeError(f"Failed to save content blocks for user message: {e}")
+            
+            # Save message to database AFTER content blocks
+            try:
+                success = await self.messages_repo.add_message(message)
+                if not success:
+                    # Rollback: delete content blocks if message save failed
+                    if blocks:
+                        try:
+                            await self.message_content_repo.delete_blocks_by_message_id(message_id)
+                            logger.warning(f"Rolled back content blocks for message {message_id} after message save failure")
+                        except Exception as rollback_error:
+                            logger.error(f"Failed to rollback content blocks for message {message_id}: {rollback_error}")
+                    raise RuntimeError("Failed to save user message to database")
+            except Exception as e:
+                # Rollback: delete content blocks if message save failed
+                if blocks:
+                    try:
+                        await self.message_content_repo.delete_blocks_by_message_id(message_id)
+                        logger.warning(f"Rolled back content blocks for message {message_id} after message save error")
+                    except Exception as rollback_error:
+                        logger.error(f"Failed to rollback content blocks for message {message_id}: {rollback_error}")
+                raise
+            
+            # Load blocks back into message for return value
+            if blocks:
                 message.content = await self.message_content_repo.get_blocks_by_message_id(message_id)
             
             logger.info(f"Successfully saved user message {message_id} to thread {thread_id}")
@@ -187,15 +210,38 @@ class MessageManagementService:
             if user_id:
                 logger.info(f"Saving assistant message {message_id} to thread {thread_id} with user_id: {user_id}")
             
-            # Save message to database
-            success = await self.messages_repo.add_message(message)
-            if not success:
-                raise RuntimeError("Failed to save assistant message to database")
-            
-            # Save content blocks to message_content collection
+            # Save content blocks to message_content collection FIRST
             if blocks:
-                await self.message_content_repo.add_content_blocks(message_id, blocks)
-                # Load blocks back into message for return value
+                try:
+                    await self.message_content_repo.add_content_blocks(message_id, blocks)
+                except Exception as e:
+                    logger.error(f"Failed to save content blocks for message {message_id}: {e}")
+                    raise RuntimeError(f"Failed to save content blocks for assistant message: {e}")
+            
+            # Save message to database AFTER content blocks
+            try:
+                success = await self.messages_repo.add_message(message)
+                if not success:
+                    # Rollback: delete content blocks if message save failed
+                    if blocks:
+                        try:
+                            await self.message_content_repo.delete_blocks_by_message_id(message_id)
+                            logger.warning(f"Rolled back content blocks for message {message_id} after message save failure")
+                        except Exception as rollback_error:
+                            logger.error(f"Failed to rollback content blocks for message {message_id}: {rollback_error}")
+                    raise RuntimeError("Failed to save assistant message to database")
+            except Exception as e:
+                # Rollback: delete content blocks if message save failed
+                if blocks:
+                    try:
+                        await self.message_content_repo.delete_blocks_by_message_id(message_id)
+                        logger.warning(f"Rolled back content blocks for message {message_id} after message save error")
+                    except Exception as rollback_error:
+                        logger.error(f"Failed to rollback content blocks for message {message_id}: {rollback_error}")
+                raise
+            
+            # Load blocks back into message for return value
+            if blocks:
                 message.content = await self.message_content_repo.get_blocks_by_message_id(message_id)
             
             logger.info(f"Successfully saved assistant message {message_id} to thread {thread_id}")

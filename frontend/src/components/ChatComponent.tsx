@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { ThumbsUp, ThumbsDown } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, ChevronDown } from 'lucide-react';
 import { Message as MessageType, ChatComponentProps, HandlerResponse, ContentBlock, ToolCallsContent, createTextBlock, createToolCallsBlock, createExplorerBlock, createVisualizationsBlock } from '../types/chat';
 import { useUIState } from '../contexts/UIStateContext';
 import Message from './Message';
@@ -72,6 +72,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   const [messages, setMessages] = useState<MessageType[]>(initialMessages);
   const [inputValue, setInputValue] = useState<string>('');
   const [pendingApproval, setPendingApproval] = useState<number | null>(null);
+  const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   // Streaming UI state
@@ -116,21 +117,54 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     return scrollHeight - scrollTop - clientHeight < threshold;
   };
 
-  const scrollToBottom = (force: boolean = false): void => {
-    if (force || checkIfNearBottom()) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+  const scrollToBottom = (): void => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Update isAtBottom state after scrolling
+    setTimeout(() => {
+      setIsAtBottom(checkIfNearBottom());
+    }, 100);
   };
 
-  // Track scroll position (listener is set up but state tracking removed as we check on-demand)
-  // The checkIfNearBottom function is called directly when needed
-
+  // Track scroll position to show/hide scroll-to-bottom button
   useEffect(() => {
-    if (messages.length > 0) {
-      // Only auto-scroll if user is near bottom (not forced)
-      scrollToBottom(false);
+    const container = messagesContainerRef.current;
+    if (!container) {
+      // If container doesn't exist yet, check again after a short delay
+      const timeoutId = setTimeout(() => {
+        const retryContainer = messagesContainerRef.current;
+        if (retryContainer) {
+          setIsAtBottom(checkIfNearBottom());
+        }
+      }, 100);
+      return () => clearTimeout(timeoutId);
     }
+
+    const handleScroll = () => {
+      setIsAtBottom(checkIfNearBottom());
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    // Check initial position
+    handleScroll();
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
   }, [messages]);
+
+  // Also check scroll position when messages change
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (container && messages.length > 0) {
+      // Small delay to ensure DOM is updated
+      const timeoutId = setTimeout(() => {
+        setIsAtBottom(checkIfNearBottom());
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    } else if (messages.length === 0) {
+      setIsAtBottom(false);
+    }
+  }, [messages.length]);
 
   // Mirror messages into a ref for post-await access
   useEffect(() => {
@@ -361,7 +395,7 @@ const updateContentBlocksCallback = useCallback(
     if (!inputValue.trim() || isLoading || disabled || streamingActive) return;
 
     // Force scroll to bottom when user sends a message
-    scrollToBottom(true);
+    scrollToBottom();
 
     const userMessage = inputValue.trim();
     
@@ -1263,7 +1297,7 @@ const updateContentBlocksCallback = useCallback(
       {/* Messages - scrollable area with padding for fixed input and header */}
       <div 
         ref={messagesContainerRef}
-        className={`flex-1 space-y-4 min-h-0 pb-40 overflow-y-auto slim-scroll ${threadTitle ? 'pt-38' : 'pt-8'}`}
+        className={`relative flex-1 space-y-4 min-h-0 pb-40 overflow-y-auto slim-scroll ${threadTitle ? 'pt-38' : 'pt-8'}`}
       >
         <div className="max-w-3xl mx-auto px-4">
         {messages.map((message) => (
@@ -1312,8 +1346,25 @@ const updateContentBlocksCallback = useCallback(
         )}
         <div ref={messagesEndRef} />
         </div>
-      </div>
 
+      {/* Scroll to bottom button - fixed above input form, aligned with messages */}
+      {!isAtBottom && messages.length > 0 && (
+        <div className={`fixed ${sidebarExpanded ? 'md:left-82' : 'md:left-14'} right-0 bottom-42 md:bottom-42 z-30 pointer-events-none`}>
+          <div className="max-w-3xl px-4 mx-auto">
+            <div className="flex justify-end">
+              <button
+                onClick={() => scrollToBottom()}
+                className="pointer-events-auto w-10 h-10 rounded-full bg-muted border-1 border-foreground/20 shadow-lg hover:bg-accent hover:border-foreground/30 hover:shadow-xl transition-all duration-200 flex items-center justify-center group"
+                title="Scroll to bottom"
+                aria-label="Scroll to bottom"
+              >
+                <ChevronDown className="w-5 h-5 text-foreground group-hover:text-foreground" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
      
       <div className={`fixed left-0 ${sidebarExpanded ? 'md:left-82' : 'md:left-14'} right-0 z-10 transition-all duration-300 ease-in-out ${
         messages.length === 0 
