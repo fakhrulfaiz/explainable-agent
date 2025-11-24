@@ -54,8 +54,8 @@ class ExplainableAgent:
         self.toolkit = SQLDatabaseToolkit(db=self.db, llm=self.llm)
         self.sql_tools = self.toolkit.get_tools()
         
-        # Create custom toolkit with LLM
-        self.custom_toolkit = CustomToolkit(llm=self.llm)
+        # Create custom toolkit with LLM and database engine
+        self.custom_toolkit = CustomToolkit(llm=self.llm, db_engine=self.engine)
         self.custom_tools = self.custom_toolkit.get_tools()
         
         # Combine tools (exclude profile tools from agent exposure)
@@ -487,6 +487,7 @@ Then you should query the schema of the most relevant tabl
         tool_rules = """TOOL USAGE:
 - ONLY call tools when necessary to answer the question
 - NEVER call the same tool twice with identical arguments
+- ALWAYS call the large_plotting_tool when user explicitly requests a matplotlib plot
 - Use smart_transform_for_viz ONLY when user explicitly requests a chart/graph/visualization
 - Stop and inform user if you can't find required data
 """
@@ -614,7 +615,7 @@ PERSONALIZATION RULES:
             return ""
     
     def _get_visualization_rules(self):
-        """Get visualization rules with supported chart types"""
+        """Get visualization rules with intelligent tool selection logic"""
         try:
             supported = get_supported_charts()
             charts_help = [
@@ -625,23 +626,42 @@ PERSONALIZATION RULES:
             
             return f"""VISUALIZATION GUIDELINES:
 
-Supported Chart Types:
-{supported_charts_list}
+TOOL SELECTION LOGIC:
+You have TWO visualization tools available:
 
-When to Create Visualizations:
-• ONLY when user explicitly asks for: chart, graph, visualization, plot
-• Examples: "show a bar chart", "create a line graph", "visualize this data"
-• If user asks for multiple charts, call smart_transform_for_viz separately for each
+1. smart_transform_for_viz (Frontend Charts):
+   • Use for: Simple bar, line, pie charts with ≤ 100 rows
+   • Use for: Standard frontend-rendered visualizations
+   • Use for: When data can be easily aggregated/summarized
+   • Supported types: {supported_charts_list}
 
-How to Create Visualizations:
-• Call smart_transform_for_viz with: raw_data, columns, viz_type
-• If viz_type not specified by user, choose the most appropriate based on data
-• Provide brief context before the visualization
+2. large_plotting_tool (Matplotlib Images):
+   • Use for: Large datasets (> 100 rows) - tool handles SQL query internally
+   • Use for: Complex scatter plots with many data points
+   • Use for: Time series data with many points
+   • Use for: Statistical plots (histograms, box plots, etc.)
+   • Use for: When user specifically requests "matplotlib", "static image", or "high-quality" plots
+   • Use for: Advanced matplotlib features not available in frontend charts
+
+DECISION PROCESS:
+1. First, determine if user wants a visualization (chart, graph, plot, visualize)
+2. If yes, consider the data size and complexity:
+   - Small/simple data (≤100 rows): Use smart_transform_for_viz
+   - Large/complex data (>100 rows): Use large_plotting_tool
+   - User requests "matplotlib" or "high-quality": Use large_plotting_tool
+3. For large_plotting_tool: Pass SQL query directly, don't fetch data first
+4. For smart_transform_for_viz: Fetch data first, then pass to tool
+
+IMPORTANT:
+• NEVER fetch large datasets (>100 rows) to pass to smart_transform_for_viz
+• Let large_plotting_tool handle SQL execution for big datasets
+• Choose the right tool based on data size and user requirements
 • DO NOT generate any image data yourself
 """
         except Exception:
             return """VISUALIZATION GUIDELINES:
-• Use smart_transform_for_viz tool when user requests charts/graphs
+• Use smart_transform_for_viz for small datasets (≤100 rows)
+• Use large_plotting_tool for large datasets (>100 rows)
 • Only call when explicitly requested
 • Do not generate image data
 """
@@ -917,8 +937,8 @@ Examples:
             self.toolkit = SQLDatabaseToolkit(db=self.db, llm=new_llm)
             self.sql_tools = self.toolkit.get_tools()
             
-            # Update custom toolkit with new LLM
-            self.custom_toolkit = CustomToolkit(llm=new_llm)
+            # Update custom toolkit with new LLM and database engine
+            self.custom_toolkit = CustomToolkit(llm=new_llm, db_engine=self.engine)
             self.custom_tools = self.custom_toolkit.get_tools()
             
             # Update combined tools

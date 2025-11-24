@@ -253,3 +253,163 @@ Transform this data into the most appropriate visualization format.""")
     ) -> str:
         """Async version of the tool."""
         return self._run(raw_data, columns, reasoning, viz_type, config)
+
+
+class LargePlottingTool(BaseTool):
+    """
+    Tool for generating high-quality matplotlib plots for large datasets.
+    Handles SQL query execution internally and uploads images to Supabase Storage.
+    """
+    
+    name: str = "large_plotting_tool"
+    description: str = """Generate high-quality matplotlib plots for large datasets (>100 rows) or complex visualizations.
+    
+    Use this tool when:
+    - Dataset has more than 100 rows
+    - User requests matplotlib, static image, or high-quality plots
+    - Complex scatter plots with many data points
+    - Time series data with many points
+    - Statistical plots (histograms, box plots, etc.)
+    - Advanced matplotlib features not available in frontend charts
+    
+    Parameters:
+    - sql_query (str): SQL query to fetch the data
+    - x_column (str): Column name for X-axis
+    - y_column (str): Column name for Y-axis  
+    - plot_type (str): Type of plot (scatter, line, bar, histogram)
+    - title (str): Title for the plot
+    - x_label (optional str): Custom X-axis label
+    - y_label (optional str): Custom Y-axis label
+    - color (optional str): Color for the plot elements
+    - fig_width (optional int): Figure width in inches (default: 10)
+    - fig_height (optional int): Figure height in inches (default: 6)
+    
+    Returns: Markdown image syntax with Supabase public URL for display in chat."""
+    
+    llm: Any = Field(description="Language model instance")
+    db_engine: Any = Field(description="Database engine for SQL execution")
+    
+    def _run(
+        self,
+        sql_query: str,
+        x_column: str,
+        y_column: str,
+        plot_type: str = "scatter",
+        title: str = "Data Plot",
+        x_label: Optional[str] = None,
+        y_label: Optional[str] = None,
+        color: str = "blue",
+        fig_width: int = 10,
+        fig_height: int = 6
+    ) -> str:
+        """Execute the large plotting tool."""
+        
+        # Import required libraries
+        try:
+            import pandas as pd
+            import matplotlib.pyplot as plt
+            import matplotlib
+            from io import BytesIO
+            from src.services.supabase_storage_service import get_supabase_storage_service
+            import logging
+            
+            # Set matplotlib to non-interactive mode for server environments
+            matplotlib.use('Agg')
+            
+            logger = logging.getLogger(__name__)
+            
+        except ImportError as e:
+            return f"Error: Required libraries not available: {str(e)}"
+        
+        try:
+            # 1. EXECUTE SQL QUERY
+            logger.info(f"Executing SQL query for large plot: {sql_query}")
+            df = pd.read_sql_query(sql_query, self.db_engine)
+            
+            if df.empty:
+                return "Error: The SQL query returned no data, so no plot could be generated."
+            
+            # 2. VALIDATE COLUMNS
+            if x_column not in df.columns:
+                return f"Error: X-axis column '{x_column}' not found in query results. Available columns: {list(df.columns)}"
+            
+            if y_column not in df.columns:
+                return f"Error: Y-axis column '{y_column}' not found in query results. Available columns: {list(df.columns)}"
+            
+            # 3. GENERATE PLOT
+            plt.figure(figsize=(fig_width, fig_height))
+            
+            # Create plot based on type
+            if plot_type.lower() == "scatter":
+                plt.scatter(df[x_column], df[y_column], alpha=0.6, c=color, s=30)
+            elif plot_type.lower() == "line":
+                plt.plot(df[x_column], df[y_column], color=color, linewidth=2)
+            elif plot_type.lower() == "bar":
+                plt.bar(df[x_column], df[y_column], color=color, alpha=0.7)
+            elif plot_type.lower() == "histogram":
+                plt.hist(df[x_column], bins=30, color=color, alpha=0.7, edgecolor='black')
+            else:
+                # Default to scatter plot
+                plt.scatter(df[x_column], df[y_column], alpha=0.6, c=color, s=30)
+            
+            # 4. CUSTOMIZE PLOT
+            plt.title(title, fontsize=14, fontweight='bold', pad=20)
+            plt.xlabel(x_label or x_column.replace('_', ' ').title(), fontsize=12)
+            plt.ylabel(y_label or y_column.replace('_', ' ').title(), fontsize=12)
+            plt.grid(True, linestyle='--', alpha=0.7)
+            
+            # Improve layout
+            plt.tight_layout()
+            
+            # 5. SAVE TO BYTES
+            img_buffer = BytesIO()
+            plt.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+            img_buffer.seek(0)
+            
+            # 6. CLEAR MATPLOTLIB MEMORY
+            plt.close()
+            
+            # 7. UPLOAD TO SUPABASE
+            storage_service = get_supabase_storage_service()
+            public_url = storage_service.upload_plot_image(
+                image_data=img_buffer.getvalue(),
+                filename=f"{plot_type}_plot.png",
+                content_type="image/png"
+            )
+            
+            # 8. RETURN MARKDOWN IMAGE
+            plot_description = f"{title} ({plot_type} plot with {len(df)} data points)"
+            markdown_image = f"![{plot_description}]({public_url})"
+            
+            logger.info(f"Successfully generated {plot_type} plot with {len(df)} data points")
+            
+            return f"""Plot generated successfully!
+
+{markdown_image}
+
+**Plot Details:**
+- Type: {plot_type.title()} Plot
+- Data Points: {len(df):,}
+- X-axis: {x_column}
+- Y-axis: {y_column}
+- Image URL: {public_url}"""
+            
+        except Exception as e:
+            logger.error(f"Error generating large plot: {str(e)}")
+            return f"Error generating plot: {str(e)}"
+    
+    async def _arun(
+        self,
+        sql_query: str,
+        x_column: str,
+        y_column: str,
+        plot_type: str = "scatter",
+        title: str = "Data Plot",
+        x_label: Optional[str] = None,
+        y_label: Optional[str] = None,
+        color: str = "blue",
+        fig_width: int = 10,
+        fig_height: int = 6
+    ) -> str:
+        """Async version of the tool."""
+        return self._run(sql_query, x_column, y_column, plot_type, title, x_label, y_label, color, fig_width, fig_height)

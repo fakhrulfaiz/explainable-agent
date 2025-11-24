@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
 
     # Database Configuration
-    database_path: str = "src/resource/chinook.db"
+    database_path: str = "src/resource/test.db"
     
     # MongoDB Configuration
     mongo_host: str = "mongodb"
