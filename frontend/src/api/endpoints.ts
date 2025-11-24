@@ -36,6 +36,9 @@ export const API_ENDPOINTS = {
   
   // Visualization endpoints
   VISUALIZATION_DATA: '/graph/visualization/data',
+  
+  // Execution History endpoints
+  EXECUTION_HISTORY: '/chat-history/checkpoints',
 } as const;
 
 // Helper function to build URLs

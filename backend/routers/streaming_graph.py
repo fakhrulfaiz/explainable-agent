@@ -71,13 +71,15 @@ async def create_graph_streaming(
     user_id = current_user.user_id
     logger.info(f"Streaming graph /start - thread_id: {thread_id}, user_id: {user_id}")
     
+    assistant_message_id = int(time.time() * 1000000)
     run_configs[thread_id] = {
         "type": "start",
         "human_request": request.human_request,
         "use_planning": request.use_planning,
         "use_explainer": request.use_explainer,
         "agent_type": request.agent_type,
-        "user_id": user_id  # Store user_id for later use
+        "user_id": user_id,  # Store user_id for later use
+        "assistant_message_id": assistant_message_id
     }
     
     
@@ -90,7 +92,8 @@ async def create_graph_streaming(
         steps=[],
         final_result=None,
         total_time=None,
-        overall_confidence=None
+        overall_confidence=None,
+        assistant_message_id=assistant_message_id
     )
 
 @router.post("/resume", response_model=GraphResponse)
@@ -104,17 +107,20 @@ async def resume_graph_streaming(
     user_id = current_user.user_id
     logger.info(f"Streaming graph /resume - thread_id: {thread_id}, user_id: {user_id}")
     
+    assistant_message_id = int(time.time() * 1000000)
     run_configs[thread_id] = {
         "type": "resume",
         "review_action": request.review_action,
         "human_comment": request.human_comment,
-        "user_id": user_id  # Store user_id for later use
+        "user_id": user_id,  # Store user_id for later use
+        "assistant_message_id": assistant_message_id
     }
     
     return GraphResponse(
         thread_id=thread_id,
         run_status="pending",
-        assistant_response=None
+        assistant_response=None,
+        assistant_message_id=assistant_message_id
     )
 
 @router.get("/{thread_id}")
@@ -137,6 +143,16 @@ async def stream_graph(request: Request, thread_id: str,
     
     config = {"configurable": {"thread_id": thread_id, "user_id": user_id}}
     logger.info(f"Added user_id to config for thread_id: {thread_id}, user_id: {user_id}")
+    
+    assistant_message_id = run_data.get("assistant_message_id")
+    if not assistant_message_id:
+        assistant_message_id = int(time.time() * 1000000)
+        run_data["assistant_message_id"] = assistant_message_id
+    
+    text_block_id = run_data.get("text_block_id")
+    if not text_block_id:
+        text_block_id = f"text_run--{uuid4()}"
+        run_data["text_block_id"] = text_block_id
     
     input_state = None
     if run_data["type"] == "start":
@@ -195,7 +211,8 @@ async def stream_graph(request: Request, thread_id: str,
         agent.graph.update_state(config, state_update)
         input_state = None
     
-    async def event_generator():       
+    async def event_generator():
+        nonlocal assistant_message_id
         buffer = ""
         
         # Log config details before streaming starts
@@ -218,6 +235,13 @@ async def stream_graph(request: Request, thread_id: str,
                     break
                 
                 node_name = metadata.get('langgraph_node', 'unknown')
+                checkpoint_ns = metadata.get('langgraph_checkpoint_ns')
+                if isinstance(checkpoint_ns, str):
+                    normalized_checkpoint_ns = checkpoint_ns.replace(" ", "_")
+                    if normalized_checkpoint_ns.startswith("assistant"):
+                        logger.debug(f"Skipping chunk from assistant_keep_agent namespace: {checkpoint_ns}")
+                        continue
+         
                 
                 if hasattr(msg, 'tool_call_chunks') and msg.tool_call_chunks:
                     if node_name in ['agent']:
@@ -367,24 +391,35 @@ async def stream_graph(request: Request, thread_id: str,
                         "action": "update_tool_result"
                     })
                     yield {"event": "content_block", "data": tool_result_data}
+                    
+                    # Tool finished - clean up tracking entry
+                    if tool_key_for_output and tool_key_for_output in pending_tool_calls:
+                        del pending_tool_calls[tool_key_for_output]
+                        if last_started_tool_id == tool_key_for_output:
+                            last_started_tool_id = None
+                            last_started_tool_name = None
                 
                 elif hasattr(msg, 'content') and msg.content:
                     if type(msg).__name__ in ['AIMessageChunk']:
-                        if node_name == 'tool_explanation' and last_started_tool_id:
-                            if last_started_tool_id in pending_tool_calls:
-                                if pending_tool_calls[last_started_tool_id].get('content') is None:
-                                    pending_tool_calls[last_started_tool_id]['content'] = ''
-                                pending_tool_calls[last_started_tool_id]['content'] += msg.content
+                        active_tool_id = None
+                        if last_started_tool_id and last_started_tool_id in pending_tool_calls:
+                            active_tool_id = last_started_tool_id
+                        
+                        if active_tool_id:
+                            if active_tool_id in pending_tool_calls:
+                                if pending_tool_calls[active_tool_id].get('content') is None:
+                                    pending_tool_calls[active_tool_id]['content'] = ''
+                                pending_tool_calls[active_tool_id]['content'] += msg.content
                             
-                            if last_started_tool_id in tool_calls_content_blocks:
-                                if tool_calls_content_blocks[last_started_tool_id]["data"].get("content") is None:
-                                    tool_calls_content_blocks[last_started_tool_id]["data"]["content"] = ''
-                                tool_calls_content_blocks[last_started_tool_id]["data"]["content"] += msg.content
+                            if active_tool_id in tool_calls_content_blocks:
+                                if tool_calls_content_blocks[active_tool_id]["data"].get("content") is None:
+                                    tool_calls_content_blocks[active_tool_id]["data"]["content"] = ''
+                                tool_calls_content_blocks[active_tool_id]["data"]["content"] += msg.content
                             
                             tool_expl_chunk = json.dumps({
                                 "block_type": "tool_calls",
-                                "block_id": f"tool_{last_started_tool_id}",
-                                "tool_call_id": last_started_tool_id,
+                                "block_id": f"tool_{active_tool_id}",
+                                "tool_call_id": active_tool_id,
                                 "tool_name": last_started_tool_name,
                                 "content": msg.content,
                                 "node": node_name,
@@ -392,6 +427,7 @@ async def stream_graph(request: Request, thread_id: str,
                             })
                             yield {"event": "content_block", "data": tool_expl_chunk}
                             continue
+                        
                         if node_name not in ['planner', 'agent']:
                             continue
                         
@@ -401,16 +437,15 @@ async def stream_graph(request: Request, thread_id: str,
                             buffer += chunk_text
                             try:
                                 parsed = json.loads(buffer)
-                               
                                 yield {
-                                "event": "message",
-                                "data": json.dumps({
-                                    "content": parsed.get("content", ""),
-                                    "node": node_name,
-                                    "type": "feedback_answer",
-                                    "stream_id": msg_id
+                                    "event": "message",
+                                    "data": json.dumps({
+                                        "content": parsed.get("content", ""),
+                                        "node": node_name,
+                                        "type": "feedback_answer",
+                                        "stream_id": msg_id
                                     })
-                                    }
+                                }
                                 buffer = ""
                                 
                             except json.JSONDecodeError:
@@ -418,13 +453,15 @@ async def stream_graph(request: Request, thread_id: str,
                         else:
                             token_data = json.dumps({
                                 "block_type": "text",
-                                "block_id": f"text_{msg_id}",
+                                "block_id": text_block_id,
                                 "content": msg.content,
                                 "node": node_name,
                                 "stream_id": msg_id,
+                                "message_id": assistant_message_id,
                                 "action": "append_text"
                             })
                             yield {"event": "content_block", "data": token_data}
+
                     elif type(msg).__name__ in ['AIMessage']:
                         msg_id_final = _extract_stream_or_message_id(msg, preferred_key='stream_id')
                         
@@ -453,10 +490,10 @@ async def stream_graph(request: Request, thread_id: str,
                         
                         yield {"event": "content_block", "data": json.dumps({
                             "block_type": "text",
-                            "block_id": f"text_{msg_id_final}",
+                            "block_id": text_block_id,
                             "content": msg.content,
                             "node": node_name,
-                            "message_id": msg_id_final,
+                            "message_id": assistant_message_id,
                             "action": "finalize_text"
                         })}
             
@@ -469,17 +506,21 @@ async def stream_graph(request: Request, thread_id: str,
             query = values.get("query", "")
             # Determine assistant final response and its message_id
             assistant_response = ""
-            assistant_message_id: int | None = None
+            assistant_message_id_from_state: int | None = None
             for m in reversed(messages):
                 if (hasattr(m, 'content') and m.content and type(m).__name__ == 'AIMessage' and (not hasattr(m, 'tool_calls') or not m.tool_calls)):
                     assistant_response = m.content
                     # Extract a numeric message id if present
                     try:
                         extracted = _extract_stream_or_message_id(m, preferred_key='message_id')
-                        assistant_message_id = int(extracted) if isinstance(extracted, (int, str)) and str(extracted).isdigit() else None
+                        assistant_message_id_from_state = int(extracted) if isinstance(extracted, (int, str)) and str(extracted).isdigit() else None
                     except Exception:
-                        assistant_message_id = None
+                        assistant_message_id_from_state = None
                     break
+            
+            if assistant_message_id is None:
+                assistant_message_id = assistant_message_id_from_state or run_data.get("assistant_message_id")
+            run_data["assistant_message_id"] = assistant_message_id
 
             # Compute checkpoint_id if present
             checkpoint_id = None
@@ -518,9 +559,9 @@ async def stream_graph(request: Request, thread_id: str,
                 }
 
             if state.next and 'human_feedback' in state.next:
+                response_type = values.get("response_type")
                 if assistant_response and message_service:
                     try:
-                        response_type = values.get("response_type")
                         if response_type == "replan":
                             logger.info(f"Replan detected in streaming - clearing needs_approval from previous messages in thread {thread_id}")
                             await clear_previous_approvals(thread_id, message_service)
@@ -538,7 +579,7 @@ async def stream_graph(request: Request, thread_id: str,
 
                         if assistant_response:
                             content_blocks.append({
-                                "id": f"text_{assistant_message_id or int(time.time() * 1000)}",
+                                "id": text_block_id or f"text_{assistant_message_id or int(time.time() * 1000)}",
                                 "type": "text",
                                 "needsApproval": True,
                                 "data": {"text": assistant_response}
@@ -584,10 +625,10 @@ async def stream_graph(request: Request, thread_id: str,
                             content_blocks.append(content_block)
 
                     if assistant_response:
-                        content_blocks.append({
-                            "id": f"text_{assistant_message_id or int(time.time() * 1000)}",
-                            "type": "text",
-                            "needsApproval": False,
+                            content_blocks.append({
+                                "id": text_block_id or f"text_{assistant_message_id or int(time.time() * 1000)}",
+                                "type": "text",
+                                "needsApproval": False,
                                 "data": {"text": assistant_response}
                         })
                     
@@ -620,19 +661,6 @@ async def stream_graph(request: Request, thread_id: str,
                         
                 except Exception as e:
                     print(f"Failed to save messages for thread {thread_id}: {e}")
-
-                # Emit explorer content block if steps exist
-                if steps and len(steps) > 0 and checkpoint_id:
-                    explorer_block_data = json.dumps({
-                        "block_type": "explorer",
-                        "block_id": f"explorer_{checkpoint_id}",
-                        "checkpoint_id": checkpoint_id,
-                        "steps": steps,
-                        "final_result": final_result_dict,
-                        "overall_confidence": overall_confidence,
-                        "action": "add_explorer"
-                    })
-                    yield {"event": "content_block", "data": explorer_block_data}
 
                 # Emit enriched completed payload
                 completed_payload = {

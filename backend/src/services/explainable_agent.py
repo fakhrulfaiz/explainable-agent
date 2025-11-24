@@ -98,6 +98,7 @@ class ExplainableAgent:
                 "TRANSFER RULES:\n"
                 "- IMPORTANT: Only route to agents when you receive a NEW user message, not for agent responses\n"
                 "- **CRITICAL: ONLY USE ONE TOOL CALL PER USER MESSAGE for transfers. PASS THE FULL TASK IN A SINGLE CALL.**\n"
+                "- **CRITICAL: DO NOT SAY ANYTHING WHEN TRANSFERRING. JUST TRANSFER.**\n"
                 "- **Example: If user asks for '3 different charts', call the transfer tool ONCE with the full request**\n"
                 "- **Example: If user asks for different objects or parameters, call the transfer tool ONCE with the full request**\n"
                 "- For mixed queries, handle preferences first, then transfer only the non-preference part\n\n"
@@ -138,6 +139,17 @@ class ExplainableAgent:
         self.graph = self.create_graph()
     
     
+    def _get_latest_human_message(self, messages: List[BaseMessage]) -> Optional[str]:
+        """Helper function to extract the latest human message from messages array"""
+        if not messages:
+            return None
+        
+        # Iterate backwards to find the latest human message
+        for msg in reversed(messages):
+            if hasattr(msg, 'content') and hasattr(msg, '__class__') and 'HumanMessage' in str(msg.__class__):
+                return msg.content
+        return None
+    
     def create_handoff_tools(self):
         """Create handoff tools for the assistant to transfer to specialized agents"""
         
@@ -156,14 +168,15 @@ class ExplainableAgent:
                 "tool_call_id": tool_call_id,
             }
             
-            # Extract query from messages if not in state
+            # Extract query from latest human message for new queries
+            # Only update if status is "approved" (new query), not "feedback" (planner_node handles it)
             query = state.get("query", "")
-            if not query and "messages" in state and state["messages"]:
-                # Get the first human message as the query
-                for msg in state["messages"]:
-                    if hasattr(msg, 'content') and hasattr(msg, '__class__') and 'HumanMessage' in str(msg.__class__):
-                        query = msg.content
-                        break
+            status = state.get("status", "approved")
+            
+            if status == "approved" and "messages" in state and state["messages"]:
+                latest_human_msg = self._get_latest_human_message(state["messages"])
+                if latest_human_msg:
+                    query = latest_human_msg
             
             # Get use_planning value from stored value
             use_planning = self._use_planning
@@ -333,6 +346,23 @@ class ExplainableAgent:
             return graph.compile(interrupt_before=["human_feedback"], checkpointer=memory)
     
     def data_exploration_entry(self, state: ExplainableAgentState):
+        """
+        Entry point for data exploration flow - updates query from latest human message.
+        Only updates query for new queries (status="approved"), not for feedback scenarios.
+        Feedback queries are handled by planner_node when processing replan.
+        """
+        status = state.get("status", "approved")
+        messages = state.get("messages", [])
+        current_query = state.get("query", "")
+        
+        if status == "approved":
+            latest_human_msg = self._get_latest_human_message(messages)
+            if latest_human_msg and latest_human_msg != current_query:
+                return {
+                    **state,
+                    "query": latest_human_msg
+                }
+        
         return state
     
     def general_agent_entry(self, state: ExplainableAgentState):
@@ -659,6 +689,9 @@ Guidelines:
         
         # Early return if no tool calls
         if not getattr(last_message, 'tool_calls', None):
+            return {"messages": []}
+
+        if getattr(last_message, 'content', None):
             return {"messages": []}
         
         # Build tool name to description mapping

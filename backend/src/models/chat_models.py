@@ -139,3 +139,26 @@ class ChatListResponse(BaseModel):
     data: List[ChatThreadSummary] = Field(default_factory=list, description="List of chat threads")
     message: str = Field(..., description="Response message")
     total: int = Field(0, description="Total number of threads")
+
+
+class CheckpointSummary(BaseModel):
+    """Summary view of a checkpoint for listing"""
+    checkpoint_id: str = Field(..., description="Checkpoint ID")
+    thread_id: str = Field(..., description="Thread ID associated with this checkpoint")
+    timestamp: datetime = Field(..., description="Checkpoint timestamp")
+    message_type: Optional[Literal["message", "explorer", "visualization", "structured"]] = Field(None, description="Message type")
+    message_id: int = Field(..., description="Message ID associated with this checkpoint")
+    query: Optional[str] = Field(None, description="User query from checkpoint state")
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class CheckpointListResponse(BaseModel):
+    """Response containing list of checkpoints"""
+    success: bool = Field(..., description="Request success status")
+    data: List[CheckpointSummary] = Field(default_factory=list, description="List of checkpoints")
+    message: str = Field(..., description="Response message")
+    total: int = Field(0, description="Total number of checkpoints")

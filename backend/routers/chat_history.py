@@ -1,16 +1,20 @@
-from fastapi import APIRouter, HTTPException, Query, Depends
-from typing import Optional, Literal
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
+from typing import Optional, Literal, Annotated
 from src.services.chat_history_service import ChatHistoryService
 from src.services.message_management_service import MessageManagementService
-from src.repositories.dependencies import get_chat_history_service, get_message_management_service
+from src.repositories.dependencies import get_chat_history_service, get_message_management_service, get_messages_repository
+from src.repositories.messages_repository import MessagesRepository
 from src.models.chat_models import (
     ChatHistoryResponse,
     ChatListResponse,
     CreateChatRequest,
-    ChatThread
+    ChatThread,
+    CheckpointSummary,
+    CheckpointListResponse
 )
 from src.middleware.auth import get_current_user
 from src.models.supabase_user import SupabaseUser
+from src.services.explainable_agent import ExplainableAgent
 from pydantic import BaseModel
 import logging
 
@@ -339,4 +343,67 @@ async def update_block_approval(
         raise
     except Exception as e:
         logger.error(f"Error updating block status for thread {thread_id}, message {message_id}, block {block_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def get_explainable_agent(request: Request) -> ExplainableAgent:
+    """Dependency to get ExplainableAgent from app state"""
+    return request.app.state.explainable_agent
+
+
+@router.get("/checkpoints", response_model=CheckpointListResponse)
+async def get_checkpoints(
+    request: Request,
+    limit: int = Query(50, ge=1, le=100, description="Number of checkpoints to return"),
+    skip: int = Query(0, ge=0, description="Number of checkpoints to skip"),
+    messages_repo: MessagesRepository = Depends(get_messages_repository),
+    current_user: SupabaseUser = Depends(get_current_user)
+):
+    """Get all checkpoints for the current user across all threads"""
+    try:
+        user_id = current_user.user_id
+        logger.info(f"Retrieving checkpoints for user_id: {user_id}")
+        
+        # Get checkpoints and total count in parallel
+        checkpoints_data = await messages_repo.get_checkpoints_by_user_id(
+            user_id=user_id,
+            limit=limit,
+            skip=skip
+        )
+        total = await messages_repo.count_checkpoints_by_user_id(user_id=user_id)
+        
+        # Convert dict results to CheckpointSummary models and fetch query from state
+        agent = get_explainable_agent(request)
+        checkpoints = []
+        for item in checkpoints_data:
+            query = None
+            # Try to get query from checkpoint state
+            try:
+                config = {"configurable": {"thread_id": item["thread_id"], "checkpoint_id": item["checkpoint_id"]}}
+                state = agent.graph.get_state(config)
+                if state and hasattr(state, 'values') and state.values:
+                    query = state.values.get("query")
+            except Exception as e:
+                logger.debug(f"Could not fetch query for checkpoint {item['checkpoint_id']}: {e}")
+                # Continue without query if state fetch fails
+            
+            checkpoints.append(
+                CheckpointSummary(
+                    checkpoint_id=item["checkpoint_id"],
+                    thread_id=item["thread_id"],
+                    timestamp=item["timestamp"],
+                    message_type=item.get("message_type"),
+                    message_id=item["message_id"],
+                    query=query
+                )
+            )
+        
+        return CheckpointListResponse(
+            success=True,
+            data=checkpoints,
+            message=f"Retrieved {len(checkpoints)} checkpoints",
+            total=total
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving checkpoints for user {current_user.user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

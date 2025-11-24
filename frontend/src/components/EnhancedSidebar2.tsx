@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PanelLeftClose, PanelLeftOpen, Plus, Search, MessageSquare, Settings, MoreVertical, Trash2, Edit, ChevronDown, LogOut } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Plus, Search, MessageSquare, Settings, MoreVertical, Trash2, Edit, ChevronDown, LogOut, History } from 'lucide-react';
 import { ChatHistoryService, ChatThreadSummary } from '../api/services/chatHistoryService';
 import { ScrollArea } from './ui/scroll-area';
 import { Button } from './ui/button';
@@ -44,17 +44,19 @@ const useIsMobile = () => {
 };
 
 interface EnhancedSidebarProps {
-  selectedThreadId?: string;
-  onThreadSelect?: (threadId: string | null) => void;
-  onNewThread?: () => void;
-  onExpandedChange?: (isExpanded: boolean) => void;
+  selectedThreadId?: string;
+  onThreadSelect?: (threadId: string | null) => void;
+  onNewThread?: () => void;
+  onExpandedChange?: (isExpanded: boolean) => void;
+  onExecutionHistoryClick?: () => void;
 }
 
 const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
   selectedThreadId,
   onThreadSelect,
   onNewThread,
-  onExpandedChange
+  onExpandedChange,
+  onExecutionHistoryClick
 }) => {
   const isMobile = useIsMobile();
   const [isExpanded, setIsExpanded] = useState(false); 
@@ -292,14 +294,28 @@ const EnhancedSidebar2: React.FC<EnhancedSidebarProps> = ({
 		    className="w-full h-10 flex items-center pl-3 bg-transparent hover:bg-accent rounded-md transition-colors"
             title={!isExpanded ? "New Thread" : undefined}
           >
-            <Plus className="h-5 w-5 flex-shrink-0" />
-            {isExpanded && (
-              <span className="ml-3 font-medium whitespace-nowrap overflow-hidden">
-                New Thread
-              </span>
-            )}
-          </button>
-        </div>
+            <Plus className="h-5 w-5 flex-shrink-0" />
+            {isExpanded && (
+              <span className="ml-3 font-medium whitespace-nowrap overflow-hidden">
+                New Thread
+              </span>
+            )}
+          </button>
+
+          {/* Execution History Button */}
+          <button
+            onClick={onExecutionHistoryClick}
+            className="w-full h-10 flex items-center pl-3 bg-transparent hover:bg-accent rounded-md transition-colors"
+            title={!isExpanded ? "Execution History" : undefined}
+          >
+            <History className="h-5 w-5 flex-shrink-0" />
+            {isExpanded && (
+              <span className="ml-3 font-medium whitespace-nowrap overflow-hidden">
+                Execution History
+              </span>
+            )}
+          </button>
+        </div>
 
         {/* Search Bar - only show when expanded */}
 			{isExpanded && (

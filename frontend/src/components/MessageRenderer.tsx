@@ -102,7 +102,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
   const renderContentBlock = (block: ContentBlock) => {
     if (isTextBlock(block)) {
       return (
-        <div key={block.id} className="content-block text-block">
+        <div key={block.id} className="content-block text-block mb-2">
           <ReactMarkdown 
             components={markdownComponents}
             remarkPlugins={[remarkGfm]}

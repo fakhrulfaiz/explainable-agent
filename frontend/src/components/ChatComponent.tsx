@@ -71,7 +71,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   
   const [messages, setMessages] = useState<MessageType[]>(initialMessages);
   const [inputValue, setInputValue] = useState<string>('');
-  const [pendingApproval, setPendingApproval] = useState<number | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<string | null>(null); // Block ID, not message ID
   const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -101,6 +101,10 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   const contextThreadId = state.currentThreadId;
   const showApprovalButtons = pendingApproval !== null && state.executionStatus === 'user_feedback';
   const messagesRef = useRef<MessageType[]>([]);
+  
+  // Mapping between backend assistant_message_id and frontend message IDs
+  // This allows content_block events with backend message_id to update the correct frontend message
+  const backendToFrontendMessageIdMap = useRef<Map<number, number>>(new Map());
 
 
 
@@ -126,6 +130,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
   };
 
   // Track scroll position to show/hide scroll-to-bottom button
+  // This effect runs once and keeps the scroll listener active
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) {
@@ -150,7 +155,7 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     return () => {
       container.removeEventListener('scroll', handleScroll);
     };
-  }, [messages]);
+  }, []); // Empty deps - only register once, scroll handler uses checkIfNearBottom which reads from ref
 
   // Also check scroll position when messages change
   useEffect(() => {
@@ -166,21 +171,92 @@ const ChatComponent: React.FC<ChatComponentProps> = ({
     }
   }, [messages.length]);
 
+  // Auto-scroll during streaming when user is near bottom
+  // This triggers on messages changes (including content block updates) and scroll position
+  useEffect(() => {
+    if (streamingActive && messages.length > 0) {
+      // Check if user is near bottom before scrolling
+      const nearBottom = checkIfNearBottom();
+      
+      if (nearBottom) {
+        // Small delay to ensure DOM is updated with new content
+        const timeoutId = setTimeout(() => {
+          // Use instant scrolling during streaming for better performance
+          messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+          // Update isAtBottom state after scrolling
+          setIsAtBottom(true);
+        }, 50);
+        return () => clearTimeout(timeoutId);
+      } else {
+        // User scrolled up, update state
+        setIsAtBottom(false);
+      }
+    }
+  }, [messages, streamingActive]);
+  
+  // Auto-scroll for new non-streaming messages (only if near bottom)
+  useEffect(() => {
+    if (!streamingActive && messages.length > 0 && isAtBottom) {
+      const timeoutId = setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [messages.length, streamingActive, isAtBottom]);
+
   // Mirror messages into a ref for post-await access
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
 
-  // Auto-set pendingApproval when messages change and there's no current pending approval
+  // Helper function to set pendingApproval from a message's first block that needs approval
+  const setPendingApprovalFromMessage = useCallback((message: MessageType | undefined) => {
+    if (!message || !message.needsApproval || !Array.isArray(message.content) || message.content.length === 0) {
+      return;
+    }
+    
+    // Find a block that has needsApproval
+    const blockNeedingApproval = message.content.find(block => block.needsApproval === true);
+    
+    if (blockNeedingApproval) {
+      setPendingApproval(blockNeedingApproval.id);
+    }
+    // If no block has needsApproval, don't set pendingApproval
+    // This means the message needs approval but blocks weren't properly marked
+  }, []);
+
+
   useEffect(() => {
     if (!pendingApproval && messages.length > 0) {
-      const messageNeedingApproval = messages.find(m => m.needsApproval);
-      if (messageNeedingApproval) {
-        setPendingApproval(messageNeedingApproval.id);
+      for (const message of messages) {
+        if (message.needsApproval) {
+          setPendingApprovalFromMessage(message);
+          break;
+        }
       }
     }
-  }, [messages, pendingApproval]);
+  }, [messages, pendingApproval, setPendingApprovalFromMessage]);
+
+  // Ensure pendingApproval always references an existing block ID
+  useEffect(() => {
+    if (!pendingApproval) return;
+
+    const blockExists = messages.some(message =>
+      Array.isArray(message.content) &&
+      message.content.some(block => block.id === pendingApproval)
+    );
+
+    if (!blockExists) {
+      setPendingApproval(null);
+      for (const msg of messages) {
+        if (msg.needsApproval) {
+          setPendingApprovalFromMessage(msg);
+          break;
+        }
+      }
+    }
+  }, [messages, pendingApproval, setPendingApprovalFromMessage]);
 
 
   // Memoize initialMessages to prevent unnecessary re-renders
@@ -375,6 +451,19 @@ const handleToolEvents = useCallback((
   }
 }, []);
 
+// Helper function to resolve backend message ID to frontend message ID
+const resolveMessageId = useCallback((frontendMessageId: number, backendMessageId?: number): number => {
+  // If backendMessageId is provided, try to resolve it to a frontend message ID
+  if (backendMessageId !== undefined && backendMessageId !== null) {
+    const mappedId = backendToFrontendMessageIdMap.current.get(backendMessageId);
+    if (mappedId !== undefined) {
+      return mappedId;
+    }
+  }
+  // Fall back to the provided frontend message ID
+  return frontendMessageId;
+}, []);
+
 // New callback for content blocks
 const updateContentBlocksCallback = useCallback(
   (messageId: number, contentBlocks: ContentBlock[]): void => {
@@ -390,6 +479,218 @@ const updateContentBlocksCallback = useCallback(
   []
 );
 
+// Shared handler for content_block events
+const handleContentBlockEvent = useCallback((
+  eventData: string,
+  streamingMsgId: number,
+  currentContentBlocks: ContentBlock[]
+): ContentBlock[] => {
+  try {
+    const blockData = JSON.parse(eventData);
+    const blockType = blockData.block_type;
+    const blockId = blockData.block_id;
+    const action = blockData.action;
+    // Extract backend message_id if present (used after approval)
+    const backendMessageId = blockData.message_id;
+    // Resolve the correct frontend message ID to update
+    const resolvedMessageId = resolveMessageId(streamingMsgId, backendMessageId);
+    let updatedBlocks = [...currentContentBlocks];
+    
+    if (blockType === 'text') {
+      if (action === 'append_text') {
+        let textBlock = updatedBlocks.find(b => b.id === blockId);
+        if (!textBlock) {
+          textBlock = createTextBlock(blockId, '', false);
+          updatedBlocks = [...updatedBlocks, textBlock];
+        }
+        (textBlock.data as any).text += blockData.content;
+      } else if (action === 'finalize_text') {
+        let textBlock = updatedBlocks.find(b => b.id === blockId);
+        if (textBlock) {
+          (textBlock.data as any).text = blockData.content;
+        }
+      }
+    } else if (blockType === 'tool_calls') {
+      const toolCallId = blockData.tool_call_id || `tool_calls_${streamingMsgId}`;
+      let consolidatedBlock = updatedBlocks.find(b => b.id === toolCallId && b.type === 'tool_calls');
+      
+      if (action === 'stream_args') {
+        if (!consolidatedBlock) {
+          const toolCall = {
+            name: blockData.tool_name,
+            input: {},
+            status: 'pending' as const
+          };
+          consolidatedBlock = createToolCallsBlock(toolCallId, [toolCall], false);
+          updatedBlocks = [...updatedBlocks, consolidatedBlock];
+        }
+        
+        const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
+        let toolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
+        
+        if (toolCallIndex < 0) {
+          toolCallsData.toolCalls.push({
+            name: blockData.tool_name,
+            input: {},
+            status: 'pending' as const
+          });
+          toolCallIndex = toolCallsData.toolCalls.length - 1;
+        }
+        
+        const existingArgs = (toolCallsData.toolCalls[toolCallIndex] as any)._argsBuffer || '';
+        const accumulatedArgs = existingArgs + (blockData.args_chunk || '');
+        (toolCallsData.toolCalls[toolCallIndex] as any)._argsBuffer = accumulatedArgs;
+        
+        try {
+          const parsedInput = JSON.parse(accumulatedArgs);
+          
+          const updatedToolCalls = [...toolCallsData.toolCalls];
+          updatedToolCalls[toolCallIndex] = {
+            ...updatedToolCalls[toolCallIndex],
+            input: parsedInput,
+            _argsBuffer: accumulatedArgs
+          } as any;
+          
+          const updatedToolCallsData: ToolCallsContent = {
+            ...toolCallsData,
+            toolCalls: updatedToolCalls
+          };
+          
+          updatedBlocks = updatedBlocks.map(block => 
+            block.id === toolCallId 
+              ? { ...block, data: updatedToolCallsData }
+              : block
+          );
+          
+          updateContentBlocksCallback(resolvedMessageId, updatedBlocks);
+        } catch (e) {
+          // JSON incomplete, wait for more chunks
+        }
+      } else if (action === 'update_tool_calls_explanation') {
+        if (!consolidatedBlock) {
+          const newToolCallsBlock = createToolCallsBlock(toolCallId, [], false);
+          (newToolCallsBlock.data as ToolCallsContent).content = '';
+          consolidatedBlock = newToolCallsBlock;
+          updatedBlocks = [...updatedBlocks, consolidatedBlock];
+        }
+        
+        const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
+        const existing = typeof toolCallsData.content === 'string' ? toolCallsData.content : '';
+        toolCallsData.content = existing + (blockData.content || '');
+        updatedBlocks = updatedBlocks.map(block => 
+          block.id === toolCallId 
+            ? { ...block, data: toolCallsData }
+            : block
+        );
+      } else if (action === 'add_tool_call') {
+        const parsedArgs = blockData.args ? JSON.parse(blockData.args) : {};
+        
+        if (!consolidatedBlock) {
+          const toolCall = {
+            name: blockData.tool_name,
+            input: parsedArgs || {},
+            status: 'pending' as const
+          };
+          consolidatedBlock = createToolCallsBlock(toolCallId, [toolCall], false);
+          updatedBlocks = [...updatedBlocks, consolidatedBlock];
+        } else {
+          const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
+          const existingToolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
+          
+          if (existingToolCallIndex >= 0) {
+            const existingInput = toolCallsData.toolCalls[existingToolCallIndex].input;
+            const newInput = (parsedArgs && Object.keys(parsedArgs).length > 0) ? parsedArgs : existingInput;
+            toolCallsData.toolCalls = [
+              ...toolCallsData.toolCalls.slice(0, existingToolCallIndex),
+              { ...toolCallsData.toolCalls[existingToolCallIndex], input: newInput },
+              ...toolCallsData.toolCalls.slice(existingToolCallIndex + 1)
+            ];
+          } else {
+            toolCallsData.toolCalls = [
+              ...toolCallsData.toolCalls,
+              {
+                name: blockData.tool_name,
+                input: parsedArgs || {},
+                status: 'pending' as const
+              }
+            ];
+          }
+          
+          updatedBlocks = updatedBlocks.map(block => 
+            block.id === toolCallId 
+              ? { ...block, data: toolCallsData }
+              : block
+          );
+        }
+      } else if (action === 'update_tool_result') {
+        if (consolidatedBlock) {
+          const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
+          const toolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
+          if (toolCallIndex >= 0) {
+            const existingToolCall = toolCallsData.toolCalls[toolCallIndex];
+            const finalInput = (blockData.input && Object.keys(blockData.input).length > 0) 
+              ? blockData.input 
+              : (existingToolCall.input && Object.keys(existingToolCall.input).length > 0 
+                  ? existingToolCall.input 
+                  : {});
+            
+            const updatedToolCall = {
+              ...existingToolCall,
+              input: finalInput,
+              output: blockData.output,
+              status: 'approved' as const
+            };
+            
+            toolCallsData.toolCalls = [
+              ...toolCallsData.toolCalls.slice(0, toolCallIndex),
+              updatedToolCall,
+              ...toolCallsData.toolCalls.slice(toolCallIndex + 1)
+            ];
+            
+            updatedBlocks = updatedBlocks.map(block => 
+              block.id === toolCallId 
+                ? { ...block, data: toolCallsData }
+                : block
+            );
+            
+            updateContentBlocksCallback(resolvedMessageId, updatedBlocks);
+          }
+        }
+        
+        handleToolEvents('tool_result', eventData, streamingMsgId);
+      }
+    } else if (blockType === 'explorer' && action === 'add_explorer') {
+      const explorerData = {
+        steps: blockData.steps || [],
+        final_result: blockData.final_result || {},
+        overall_confidence: blockData.overall_confidence || 0,
+        checkpoint_id: blockData.checkpoint_id,
+        query: blockData.query || '',
+        run_status: 'finished'
+      };
+      const explorerBlock = createExplorerBlock(blockId, blockData.checkpoint_id, false, explorerData);
+      updatedBlocks = [...updatedBlocks, explorerBlock];
+    } else if (blockType === 'visualizations' && action === 'add_visualizations') {
+      const visualizations = blockData.visualizations || [];
+      const vizBlock = createVisualizationsBlock(blockId, blockData.checkpoint_id, false, visualizations);
+      updatedBlocks = [...updatedBlocks, vizBlock];
+    }
+    
+    // Update the message with current content blocks
+    updateContentBlocksCallback(resolvedMessageId, updatedBlocks);
+    
+    // Also update ephemeral tool indicator for tool events
+    if (blockType === 'tool_calls') {
+      handleToolEvents('tool_call', eventData, streamingMsgId);
+    }
+    
+    return updatedBlocks;
+  } catch (error) {
+    console.error('Error handling content_block event:', error);
+    return currentContentBlocks;
+  }
+}, [resolveMessageId, updateContentBlocksCallback, handleToolEvents]);
+
 
   const handleSend = async (): Promise<void> => {
     if (!inputValue.trim() || isLoading || disabled || streamingActive) return;
@@ -401,7 +702,9 @@ const updateContentBlocksCallback = useCallback(
     
     // If there's a pending approval, treat this as feedback
     if (pendingApproval) {
-      const message = messages.find(m => m.id === pendingApproval);
+      const message = messages.find(m => 
+        Array.isArray(m.content) && m.content.some(block => block.id === pendingApproval)
+      );
       if (!message) return;
 
       // Add feedback as a user message
@@ -418,13 +721,14 @@ const updateContentBlocksCallback = useCallback(
       
       // Call the feedback handler
       if (onFeedback) {
-        console.log('onFeedback was called');
         const result = await onFeedback(userMessage, message);
-        console.log('result', result);
         // Handle the result similar to handleSendFeedback
         if (result) {
           if ((result as HandlerResponse).isStreaming && (result as HandlerResponse).streamingHandler) {
-            const streamingMsgId = Date.now() + 1;
+            const backendStreamId = (result as HandlerResponse).backendMessageId;
+            const streamingMsgId = (backendStreamId && typeof backendStreamId === 'number')
+              ? backendStreamId
+              : Date.now() + 1;
             const streamingMessage: MessageType = {
               id: streamingMsgId,
               role: 'assistant',
@@ -457,7 +761,10 @@ const updateContentBlocksCallback = useCallback(
                 ));
                 
                 if (status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)) {
-                  setPendingApproval(streamingMsgId);
+                  // Find the first block that needs approval in the streaming message
+                  // Use messagesRef to get the latest state
+                  const streamingMessage = messagesRef.current.find(m => m.id === streamingMsgId);
+                  setPendingApprovalFromMessage(streamingMessage);
                 }
               }
             });
@@ -477,7 +784,7 @@ const updateContentBlocksCallback = useCallback(
             };
             setMessages(prev => [...prev, assistantMessage]);
             if (assistantMessage.needsApproval) {
-              setPendingApproval(assistantMessage.id);
+              setPendingApprovalFromMessage(assistantMessage);
             } else {
               setPendingApproval(null);
             }
@@ -510,7 +817,9 @@ const updateContentBlocksCallback = useCallback(
       const response = await onSendMessage(userMessage, messages, { usePlanning, useExplainer, attachedFiles });
       if (response.isStreaming && response.streamingHandler) {
         
-        const streamingMsgId = Date.now() + 1;
+        const streamingMsgId = (response.backendMessageId && typeof response.backendMessageId === 'number')
+          ? response.backendMessageId
+          : Date.now() + 1;
         const streamingMessage: MessageType = {
           id: streamingMsgId,
           role: 'assistant',
@@ -531,242 +840,11 @@ const updateContentBlocksCallback = useCallback(
             
             // Handle content_block events
             if (status === 'content_block' && eventData) {
-              try {
-                const blockData = JSON.parse(eventData);
-                const blockType = blockData.block_type;
-                const blockId = blockData.block_id;
-                const action = blockData.action;
-                
-                if (blockType === 'text') {
-                  if (action === 'append_text') {
-                    // Find existing text block or create new one
-                    let textBlock = currentContentBlocks.find(b => b.id === blockId);
-                    if (!textBlock) {
-                      textBlock = createTextBlock(blockId, '', false);
-                      currentContentBlocks = [...currentContentBlocks, textBlock];
-                    }
-                    // Append text content
-                    (textBlock.data as any).text += blockData.content;
-                    
-        
-                  } else if (action === 'finalize_text') {
-                    // Update final text content
-                    let textBlock = currentContentBlocks.find(b => b.id === blockId);
-                    if (textBlock) {
-                      (textBlock.data as any).text = blockData.content;
-                    }
-                  }
-                } else if (blockType === 'tool_calls') {
-
-                  const toolCallId = blockData.tool_call_id || `tool_calls_${streamingMsgId}`;
-                  let consolidatedBlock = currentContentBlocks.find(b => b.id === toolCallId && b.type === 'tool_calls');
-                  
-                  if (action === 'stream_args') {
-                    // Ensure consolidatedBlock exists
-                    if (!consolidatedBlock) {
-                      const toolCall = {
-                        name: blockData.tool_name,
-                        input: {},
-                        status: 'pending' as const
-                      };
-                      consolidatedBlock = createToolCallsBlock(toolCallId, [toolCall], false);
-                      currentContentBlocks = [...currentContentBlocks, consolidatedBlock];
-                    }
-                    
-                    const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
-                    let toolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
-                    
-                    // Create tool call if it doesn't exist
-                    if (toolCallIndex < 0) {
-                      toolCallsData.toolCalls.push({
-                        name: blockData.tool_name,
-                        input: {},
-                        status: 'pending' as const
-                      });
-                      toolCallIndex = toolCallsData.toolCalls.length - 1;
-                    }
-                    
-                    // Accumulate args_chunk and parse JSON when complete
-                    const existingArgs = (toolCallsData.toolCalls[toolCallIndex] as any)._argsBuffer || '';
-                    const accumulatedArgs = existingArgs + (blockData.args_chunk || '');
-                    
-                    // Store buffer for next chunk
-                    (toolCallsData.toolCalls[toolCallIndex] as any)._argsBuffer = accumulatedArgs;
-                    
-                    // Try to parse the accumulated JSON - only update if valid JSON
-                    try {
-                      const parsedInput = JSON.parse(accumulatedArgs);
-                      console.log('[stream_args] Updated input:', parsedInput);
-                      
-                      // Only update input when JSON is successfully parsed
-                      // Create a new array with the updated tool call
-                      const updatedToolCalls = [...toolCallsData.toolCalls];
-                      const existingToolCall = updatedToolCalls[toolCallIndex];
-                      
-                      updatedToolCalls[toolCallIndex] = {
-                        ...existingToolCall,
-                        input: parsedInput,
-                        // Preserve the buffer for potential future updates
-                        _argsBuffer: accumulatedArgs
-                      } as any;
-                      
-                      // Create new toolCallsData with updated tool calls
-                      const updatedToolCallsData: ToolCallsContent = {
-                        ...toolCallsData,
-                        toolCalls: updatedToolCalls
-                      };
-                      
-                      // Update the block in the array
-                      currentContentBlocks = currentContentBlocks.map(block => 
-                        block.id === toolCallId 
-                          ? { ...block, data: updatedToolCallsData }
-                          : block
-                      );
-                      
-                      // Update UI immediately when JSON is valid
-                      updateContentBlocksCallback(streamingMsgId, [...currentContentBlocks]);
-                    } catch (e) {
-                      // JSON is incomplete, don't update input yet - wait for more chunks
-                      // Keep the existing input (or empty object) until JSON is complete
-                    }
-                    
-                  } else if (action === 'update_tool_calls_explanation') {
-                   
-                    if (!consolidatedBlock) {
-                      const newToolCallsBlock = createToolCallsBlock(toolCallId, [], false);
-                      (newToolCallsBlock.data as ToolCallsContent).content = '';
-                      consolidatedBlock = newToolCallsBlock;
-                      currentContentBlocks = [...currentContentBlocks, consolidatedBlock];
-                    }
-              
-                    const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
-                    const existing = typeof toolCallsData.content === 'string' ? toolCallsData.content : '';
-                    toolCallsData.content = existing + (blockData.content || '');
-                    // Update the block in the array
-                    currentContentBlocks = currentContentBlocks.map(block => 
-                      block.id === toolCallId 
-                        ? { ...block, data: toolCallsData }
-                        : block
-                    );
-                  } else if (action === 'add_tool_call') {
-                    const parsedArgs = blockData.args ? JSON.parse(blockData.args) : {};
-                    
-                    if (!consolidatedBlock) {
-                      // Create new consolidated tool calls block
-                      const toolCall = {
-                        name: blockData.tool_name,
-                        input: parsedArgs || {},  // Ensure input is always an object
-                        status: 'pending' as const
-                      };
-                      consolidatedBlock = createToolCallsBlock(toolCallId, [toolCall], false);
-                      currentContentBlocks = [...currentContentBlocks, consolidatedBlock];
-                    
-                    } else { 
-                      // Add or update tool call in consolidated block
-                      const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
-                      const existingToolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
-                      
-                      if (existingToolCallIndex >= 0) {
-                        // Update existing tool call with input, but preserve existing input if parsedArgs is empty
-                        const existingInput = toolCallsData.toolCalls[existingToolCallIndex].input;
-                        const newInput = (parsedArgs && Object.keys(parsedArgs).length > 0) ? parsedArgs : existingInput;
-                        toolCallsData.toolCalls = [
-                          ...toolCallsData.toolCalls.slice(0, existingToolCallIndex),
-                          { ...toolCallsData.toolCalls[existingToolCallIndex], input: newInput },
-                          ...toolCallsData.toolCalls.slice(existingToolCallIndex + 1)
-                        ];
-                      } else {
-                        // Add new tool call
-                        toolCallsData.toolCalls = [
-                          ...toolCallsData.toolCalls,
-                          {
-                            name: blockData.tool_name,
-                            input: parsedArgs || {},  // Ensure input is always an object
-                            status: 'pending' as const
-                          }
-                        ];
-                      }
-                      
-                      // Update the block in the array
-                      currentContentBlocks = currentContentBlocks.map(block => 
-                        block.id === toolCallId 
-                          ? { ...block, data: toolCallsData }
-                          : block
-                      );
-                    }
-                    
-                  } else if (action === 'update_tool_result') {
-                    // Update tool result for specific tool call in consolidated block
-                    if (consolidatedBlock) {
-                      const toolCallsData = { ...consolidatedBlock.data } as ToolCallsContent;
-                      const toolCallIndex = toolCallsData.toolCalls.findIndex(tc => tc.name === blockData.tool_name);
-                      if (toolCallIndex >= 0) {
-                        const existingToolCall = toolCallsData.toolCalls[toolCallIndex];
-                        // Use input from blockData if provided and not empty, otherwise preserve existing input
-                        const finalInput = (blockData.input && Object.keys(blockData.input).length > 0) 
-                          ? blockData.input 
-                          : (existingToolCall.input && Object.keys(existingToolCall.input).length > 0 
-                              ? existingToolCall.input 
-                              : {});
-                        
-                        // Update tool call with result and input
-                        const updatedToolCall = {
-                          ...existingToolCall,
-                          input: finalInput,
-                          output: blockData.output,
-                          status: 'approved' as const
-                        };
-                        
-                        toolCallsData.toolCalls = [
-                          ...toolCallsData.toolCalls.slice(0, toolCallIndex),
-                          updatedToolCall,
-                          ...toolCallsData.toolCalls.slice(toolCallIndex + 1)
-                        ];
-                        
-                        // Update the block in the array
-                        currentContentBlocks = currentContentBlocks.map(block => 
-                          block.id === toolCallId 
-                            ? { ...block, data: toolCallsData }
-                            : block
-                        );
-                        
-                        // Update UI
-                        updateContentBlocksCallback(streamingMsgId, [...currentContentBlocks]);
-                      }
-                    }
-                    
-                    // Also update ephemeral tool indicator when tool result arrives
-                    handleToolEvents('tool_result', eventData, streamingMsgId);
-                  }
-                } else if (blockType === 'explorer' && action === 'add_explorer') {
-                  // Add explorer content block with the actual explorer data
-                  const explorerData = {
-                    steps: blockData.steps || [],
-                    final_result: blockData.final_result || {},
-                    overall_confidence: blockData.overall_confidence || 0,
-                    checkpoint_id: blockData.checkpoint_id,
-                    query: blockData.query || '',
-                    run_status: 'finished' // Default status for completed explorer blocks
-                  };
-                  const explorerBlock = createExplorerBlock(blockId, blockData.checkpoint_id, false, explorerData);
-                  currentContentBlocks = [...currentContentBlocks, explorerBlock];
-                } else if (blockType === 'visualizations' && action === 'add_visualizations') {
-                  // Add visualizations content block with the actual visualization data
-                  const visualizations = blockData.visualizations || [];
-                  const vizBlock = createVisualizationsBlock(blockId, blockData.checkpoint_id, false, visualizations);
-                  currentContentBlocks = [...currentContentBlocks, vizBlock];
-                }
-                
-                // Update the message with current content blocks
-                updateContentBlocksCallback(streamingMsgId, [...currentContentBlocks]);
-                
-                // Also update ephemeral tool indicator for tool events
-                if (blockType === 'tool_calls') {
-                  handleToolEvents('tool_call', eventData, streamingMsgId);
-                }
-              } catch (error) {
-                console.error('Error handling content_block event:', error);
-              }
+              currentContentBlocks = handleContentBlockEvent(
+                eventData,
+                streamingMsgId,
+                currentContentBlocks
+              );
               return;
             }
         
@@ -788,6 +866,7 @@ const updateContentBlocksCallback = useCallback(
               // Add error as text content block
               const errorBlock = createTextBlock(`error_${Date.now()}`, errorText ? `Error: ${errorText}` : 'Unknown error', false);
               currentContentBlocks = [...currentContentBlocks, errorBlock];
+              // Note: error events typically don't have backend message_id, so we use streamingMsgId
               updateContentBlocksCallback(streamingMsgId, [...currentContentBlocks]);
               
               setMessages(prev => prev.map(m => 
@@ -805,18 +884,49 @@ const updateContentBlocksCallback = useCallback(
             if (status === 'finished' || status === 'user_feedback') {
               setToolStepHistory(null);
               
-              setMessages(prev => prev.map(m => 
-                m.id === streamingMsgId
-                  ? { 
-                      ...m, 
-                      isStreaming: status !== 'finished', 
-                      needsApproval: status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)
-                    }
-                  : m
-              ));
+              const messageNeedsApproval = status === 'user_feedback' && (responseType === 'replan' || responseType === undefined);
               
-              if (status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)) {
-                setPendingApproval(streamingMsgId);
+              // Update message and propagate needsApproval to blocks if message needs approval
+              setMessages(prev => prev.map(m => {
+                if (m.id === streamingMsgId) {
+                  if (messageNeedsApproval && Array.isArray(m.content)) {
+                    // Propagate needsApproval from message to all blocks
+                    const updatedContent = m.content.map(block => ({
+                      ...block,
+                      needsApproval: true
+                    }));
+                    return {
+                      ...m,
+                      isStreaming: false,
+                      needsApproval: true,
+                      content: updatedContent
+                    };
+                  }
+                  return {
+                    ...m,
+                    isStreaming: false,
+                    needsApproval: messageNeedsApproval
+                  };
+                }
+                return m;
+              }));
+              
+              if (messageNeedsApproval) {
+                // Find the first block that needs approval (should be the first one now)
+                const streamingMessage = messagesRef.current.find(m => m.id === streamingMsgId);
+                if (streamingMessage && Array.isArray(streamingMessage.content) && streamingMessage.content.length > 0) {
+                  // After updating, the first block should have needsApproval
+                  // Use a small delay to ensure state is updated
+                  setTimeout(() => {
+                    const updatedMessage = messagesRef.current.find(m => m.id === streamingMsgId);
+                    if (updatedMessage && Array.isArray(updatedMessage.content) && updatedMessage.content.length > 0) {
+                      const firstBlock = updatedMessage.content[0];
+                      if (firstBlock) {
+                        setPendingApproval(firstBlock.id);
+                      }
+                    }
+                  }, 0);
+                }
               }
             }
 
@@ -848,7 +958,7 @@ const updateContentBlocksCallback = useCallback(
         setMessages(prev => [...prev, assistantMessage]);
         
       if (response.needsApproval) {
-        setPendingApproval(assistantMessage.id);
+        setPendingApprovalFromMessage(assistantMessage);
       } else {
         setPendingApproval(null);
         }
@@ -869,21 +979,56 @@ const updateContentBlocksCallback = useCallback(
     } 
   };
 
-  const handleApprove = async (messageId: number): Promise<void> => {
-    const message = messages.find(m => m.id === messageId);
+  const handleApprove = async (blockId: string): Promise<void> => {
+    // Find the message containing this block
+    const message = messages.find(m => 
+      Array.isArray(m.content) && m.content.some(block => block.id === blockId)
+    );
     
     if (!message) {
+      console.warn('handleApprove: pending approval message not found', { blockId });
       return;
     }
     
-    
-    if (!message.needsApproval) {
+    const block = Array.isArray(message.content) ? message.content.find(b => b.id === blockId) : null;
+    if (!block || !block.needsApproval) {
+      console.warn('handleApprove: block not found or no longer awaiting approval', { blockId, messageId: message.id });
       return;
     }
     
     setPendingApproval(null);
     setExecutionStatus('running');
     setLoading(true);
+
+    // Immediately persist approval status to backend before processing approval
+    // This ensures the approval state is saved even if the approval process fails
+    try {
+      if (Array.isArray(message.content)) {
+        // Update the specific block to approved status
+        const updatedContent = message.content.map(b => 
+          b.id === blockId 
+            ? { ...b, messageStatus: 'approved' as const, needsApproval: false }
+            : b
+        );
+        
+        // Check if message still needs approval after updating this block
+        const stillNeedsApproval = updatedContent.some(b => b.needsApproval === true);
+        
+        await updateMessageFlags(message.id, { 
+          content: updatedContent,
+          needsApproval: stillNeedsApproval,
+          messageStatus: stillNeedsApproval ? message.messageStatus : 'approved' as const
+        });
+      } else {
+        await updateMessageFlags(message.id, { 
+          messageStatus: 'approved' as const,
+          needsApproval: false
+        });
+      }
+    } catch (updateError) {
+      console.error('Failed to persist approval status:', updateError);
+      // Continue with approval process even if persistence fails
+    }
 
     try {
       
@@ -898,7 +1043,10 @@ const updateContentBlocksCallback = useCallback(
         const result = await onApprove(textContent, message);
         if (result) {
           if ((result as HandlerResponse).isStreaming && (result as HandlerResponse).streamingHandler) {
-            const streamingMsgId = Date.now() + 1;
+            const backendStreamId = (result as HandlerResponse).backendMessageId;
+            const streamingMsgId = (backendStreamId && typeof backendStreamId === 'number')
+              ? backendStreamId
+              : Date.now() + 1;
             const streamingMessage: MessageType = {
               id: streamingMsgId,
               role: 'assistant',
@@ -909,10 +1057,33 @@ const updateContentBlocksCallback = useCallback(
             } as any;
             setMessages(prev => [...prev, streamingMessage]);
             setStreamingActive(true);
+            
+            // Create mapping from original message's backend ID to new streaming message ID
+            // This allows content_block events with the original backend message_id to update the new streaming message
+            // Check if the original message has a backend ID (it might be the same as the frontend ID if it came from backend)
+            // We'll try to find it by checking if the message ID matches a backend ID pattern or if we can infer it
+            // For now, we'll map the original message ID to the new streaming message ID
+            // The backend will send events with the original assistant_message_id, which might be the same as message.id
+            // or we need to track it separately. Let's assume message.id could be the backend ID if it's a number from backend
+            if (message.id && typeof message.id === 'number') {
+              backendToFrontendMessageIdMap.current.set(message.id, streamingMsgId);
+            }
             try {
+              // Track content blocks for the streaming message after approval
+              let currentContentBlocks: ContentBlock[] = [];
+              
               await (result as HandlerResponse).streamingHandler!(streamingMsgId, updateContentBlocksCallback, (status, eventData, responseType) => {
                 if (!status) return;
                 
+                // Handle content_block events
+                if (status === 'content_block' && eventData) {
+                  currentContentBlocks = handleContentBlockEvent(
+                    eventData,
+                    streamingMsgId,
+                    currentContentBlocks
+                  );
+                  return;
+                }
                 
                 if (status === 'tool_call' && eventData) {
                   const toolData = JSON.parse(eventData);
@@ -981,18 +1152,49 @@ const updateContentBlocksCallback = useCallback(
                 if (status === 'finished' || status === 'user_feedback') {
                   setToolStepHistory(null);
                   
-                  setMessages(prev => prev.map(m => 
-                    m.id === streamingMsgId
-                      ? { 
-                          ...m, 
-                          isStreaming: status !== 'finished', 
-                          needsApproval: status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)
-                        }
-                      : m
-                  ));
+                  const messageNeedsApproval = status === 'user_feedback' && (responseType === 'replan' || responseType === undefined);
                   
-                  if (status === 'user_feedback' && (responseType === 'replan' || responseType === undefined)) {
-                    setPendingApproval(streamingMsgId);
+                  // Update message and propagate needsApproval to blocks if message needs approval
+                  setMessages(prev => prev.map(m => {
+                    if (m.id === streamingMsgId) {
+                      if (messageNeedsApproval && Array.isArray(m.content)) {
+                        // Propagate needsApproval from message to all blocks
+                        const updatedContent = m.content.map(block => ({
+                          ...block,
+                          needsApproval: true
+                        }));
+                        return {
+                          ...m,
+                          isStreaming: false,
+                          needsApproval: true,
+                          content: updatedContent
+                        };
+                      }
+                      return {
+                        ...m,
+                        isStreaming: false,
+                        needsApproval: messageNeedsApproval
+                      };
+                    }
+                    return m;
+                  }));
+                  
+                  if (messageNeedsApproval) {
+                    // Find the first block that needs approval (should be the first one now)
+                    const streamingMessage = messagesRef.current.find(m => m.id === streamingMsgId);
+                    if (streamingMessage && Array.isArray(streamingMessage.content) && streamingMessage.content.length > 0) {
+                      // After updating, the first block should have needsApproval
+                      // Use a small delay to ensure state is updated
+                      setTimeout(() => {
+                        const updatedMessage = messagesRef.current.find(m => m.id === streamingMsgId);
+                        if (updatedMessage && Array.isArray(updatedMessage.content) && updatedMessage.content.length > 0) {
+                          const firstBlock = updatedMessage.content[0];
+                          if (firstBlock) {
+                            setPendingApproval(firstBlock.id);
+                          }
+                        }
+                      }, 0);
+                    }
                   }
                 }
               });
@@ -1021,18 +1223,7 @@ const updateContentBlocksCallback = useCallback(
             threadId: contextThreadId || currentThreadId || undefined
           };
           setMessages(prev => [...prev, resultMessage]);
-          // Update blocks to approved status
-          if (Array.isArray(message.content)) {
-            const updatedContent = message.content.map(block => ({
-              ...block,
-              messageStatus: 'approved' as const,
-              needsApproval: false
-            }));
-            await updateMessageFlags(messageId, { content: updatedContent });
-          } else {
-            // For legacy messages without content blocks, use messageStatus
-            await updateMessageFlags(messageId, { messageStatus: 'approved' as const });
-          }
+          // Note: Approval status was already persisted upfront, no need to update again
           }
         }
       }
@@ -1041,37 +1232,44 @@ const updateContentBlocksCallback = useCallback(
       const isTimeout = isTimeoutError(error as Error);
       
       if (isTimeout) {
-        // Update blocks to restore needsApproval
+        // Restore needsApproval if approval process timed out
         if (Array.isArray(message.content)) {
-          const updatedContent = message.content.map(block => ({
-            ...block,
-            approved: false,
-            needsApproval: block.needsApproval !== false, // Restore if it was true
-            disapproved: false
-          }));
-          await updateMessageFlags(messageId, { 
+          const updatedContent = message.content.map(b => 
+            b.id === blockId 
+              ? { ...b, messageStatus: 'timeout' as const, needsApproval: true }
+              : b
+          );
+          await updateMessageFlags(message.id, { 
             content: updatedContent,
-            messageStatus: 'timeout'
+            needsApproval: true,
+            messageStatus: 'timeout' as const
           });
         } else {
           // For legacy messages without content blocks, use messageStatus
-          await updateMessageFlags(messageId, {
-            messageStatus: 'timeout'
+          await updateMessageFlags(message.id, {
+            messageStatus: 'timeout' as const,
+            needsApproval: true
           });
         }
       } else {
-        // Update blocks to restore needsApproval
+        // Restore needsApproval if approval process failed
         if (Array.isArray(message.content)) {
-          const updatedContent = message.content.map(block => ({
-            ...block,
-            approved: false,
-            needsApproval: block.needsApproval !== false, // Restore if it was true
-            disapproved: false
-          }));
-          await updateMessageFlags(messageId, { content: updatedContent });
+          const updatedContent = message.content.map(b => 
+            b.id === blockId 
+              ? { ...b, messageStatus: 'pending' as const, needsApproval: true }
+              : b
+          );
+          await updateMessageFlags(message.id, { 
+            content: updatedContent,
+            needsApproval: true,
+            messageStatus: 'pending' as const
+          });
         } else {
           // For legacy messages without content blocks, use messageStatus
-          await updateMessageFlags(messageId, { messageStatus: 'pending' });
+          await updateMessageFlags(message.id, { 
+            messageStatus: 'pending' as const,
+            needsApproval: true
+          });
         }
         
         const errorMessageId = Date.now() + 1;
@@ -1092,22 +1290,18 @@ const updateContentBlocksCallback = useCallback(
   };
 
 
-  const handleCancel = async (messageId: number): Promise<void> => {
-    // If messageId is 0, find the latest message that needs approval
-    let message;
-    if (messageId === 0) {
-      message = messages.find(m => m.needsApproval === true);
-    } else {
-      message = messages.find(m => m.id === messageId);
-    }
+  const handleCancel = async (blockId: string): Promise<void> => {
+    // Find the message containing this block
+    const message = messages.find(m => 
+      Array.isArray(m.content) && m.content.some(block => block.id === blockId)
+    );
     
     if (!message) {
       return;
     }
     
-    // Only allow cancelling messages that need approval
-    if (!message.needsApproval) {
-      console.warn('Attempted to cancel a message that does not need approval:', messageId);
+    const block = Array.isArray(message.content) ? message.content.find(b => b.id === blockId) : null;
+    if (!block || !block.needsApproval) {
       return;
     }
     
@@ -1115,17 +1309,28 @@ const updateContentBlocksCallback = useCallback(
     setExecutionStatus('running');
     setLoading(true);
 
-    // Update blocks to show they're cancelled
+    // Update the specific block to show it's cancelled
     if (Array.isArray(message.content)) {
-      const updatedContent = message.content.map(block => ({
-        ...block,
-        messageStatus: 'rejected' as const,
-        needsApproval: false
-      }));
-      await updateMessageFlags(message.id, { content: updatedContent });
+      const updatedContent = message.content.map(b => 
+        b.id === blockId 
+          ? { ...b, messageStatus: 'rejected' as const, needsApproval: false }
+          : b
+      );
+      
+      // Check if message still needs approval after updating this block
+      const stillNeedsApproval = updatedContent.some(b => b.needsApproval === true);
+      
+      await updateMessageFlags(message.id, { 
+        content: updatedContent,
+        needsApproval: stillNeedsApproval,
+        messageStatus: 'rejected' as const
+      });
     } else {
       // For legacy messages without content blocks, use messageStatus
-      await updateMessageFlags(message.id, { messageStatus: 'rejected' as const });
+      await updateMessageFlags(message.id, { 
+        messageStatus: 'rejected' as const,
+        needsApproval: false
+      });
     }
 
     try {
@@ -1207,8 +1412,13 @@ const updateContentBlocksCallback = useCallback(
         }
       } else {
         // Fallback to local retry logic if no parent handler
-        // For timeout retries, we'll try to approve the message
-        await handleApprove(messageId);
+        // For timeout retries, find the first block that needs approval and approve it
+        if (message.needsApproval && Array.isArray(message.content)) {
+          const blockNeedingApproval = message.content.find(block => block.needsApproval === true);
+          if (blockNeedingApproval) {
+            await handleApprove(blockNeedingApproval.id);
+          }
+        }
       }
     } catch (error) {
       const isTimeout = isTimeoutError(error as Error);
@@ -1308,7 +1518,10 @@ const updateContentBlocksCallback = useCallback(
               />
               
           {/* Inline approval controls under the message that needs approval */}
-          {message.needsApproval && message.id === pendingApproval && showApprovalButtons && (
+          {message.needsApproval && 
+           Array.isArray(message.content) && 
+           message.content.some(block => block.id === pendingApproval) && 
+           showApprovalButtons && (
             <div className="mt-0 mb-3 flex gap-2 justify-end max-w-3xl">
               <button
                 onClick={() => pendingApproval && handleApprove(pendingApproval)}

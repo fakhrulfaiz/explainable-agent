@@ -34,6 +34,9 @@ class MessagesRepository(BaseRepository[ChatMessage]):
             await self.collection.create_index([("sender", 1), ("timestamp", -1)], name="idx_sender_timestamp")
             await self.collection.create_index([("message_type", 1), ("timestamp", -1)], name="idx_message_type_timestamp")
             await self.collection.create_index([("checkpoint_id", 1)], sparse=True, name="idx_checkpoint_id")
+            # User-based queries for execution history
+            await self.collection.create_index([("user_id", 1), ("checkpoint_id", 1)], sparse=True, name="idx_user_checkpoint")
+            await self.collection.create_index([("user_id", 1), ("timestamp", -1)], name="idx_user_timestamp")
             
             # Audit and maintenance indexes
             await self.collection.create_index([("updated_at", -1)], name="idx_updated_at")
@@ -155,3 +158,94 @@ class MessagesRepository(BaseRepository[ChatMessage]):
         except Exception as e:
             logger.error(f"Error deleting messages for thread {thread_id}: {e}")
             raise Exception(f"Failed to delete messages: {e}")
+
+    async def get_checkpoints_by_user_id(self, user_id: str, limit: Optional[int] = None, skip: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get distinct checkpoints for a user across all threads, sorted by timestamp descending"""
+        try:
+            # Pipeline to get distinct checkpoints with metadata
+            pipeline = [
+                # Match messages with checkpoint_id and user_id
+                {
+                    "$match": {
+                        "user_id": user_id,
+                        "checkpoint_id": {"$exists": True, "$ne": None}
+                    }
+                },
+                # Sort by timestamp descending
+                {"$sort": {"timestamp": -1}},
+                # Group by checkpoint_id to get unique checkpoints
+                {
+                    "$group": {
+                        "_id": "$checkpoint_id",
+                        "checkpoint_id": {"$first": "$checkpoint_id"},
+                        "thread_id": {"$first": "$thread_id"},
+                        "timestamp": {"$first": "$timestamp"},
+                        "message_type": {"$first": "$message_type"},
+                        "message_id": {"$first": "$message_id"}
+                    }
+                },
+                # Sort grouped results by timestamp descending
+                {"$sort": {"timestamp": -1}},
+                # Project final fields
+                {
+                    "$project": {
+                        "_id": 0,
+                        "checkpoint_id": 1,
+                        "thread_id": 1,
+                        "timestamp": 1,
+                        "message_type": 1,
+                        "message_id": 1
+                    }
+                }
+            ]
+            
+            # Add skip and limit if provided
+            if skip:
+                pipeline.append({"$skip": skip})
+            if limit:
+                pipeline.append({"$limit": limit})
+            
+          
+            results = []
+            cursor = await self.collection.aggregate(pipeline)
+            async for doc in cursor:
+                results.append(doc)
+            
+            return results
+        except PyMongoError as e:
+            logger.error(f"Error finding checkpoints for user {user_id}: {e}")
+            raise Exception(f"Failed to find checkpoints: {e}")
+
+    async def count_checkpoints_by_user_id(self, user_id: str) -> int:
+        """Count distinct checkpoints for a user"""
+        try:
+            pipeline = [
+                {
+                    "$match": {
+                        "user_id": user_id,
+                        "checkpoint_id": {"$exists": True, "$ne": None}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$checkpoint_id"
+                    }
+                },
+                {
+                    "$count": "total"
+                }
+            ]
+            
+            # For Motor: iterate the cursor directly
+            cursor = await self.collection.aggregate(pipeline)
+            result = None
+            async for doc in cursor:
+                result = doc
+                break
+            
+            if result and "total" in result:
+                return result.get("total", 0)
+            return 0
+        except PyMongoError as e:
+            logger.error(f"Error counting checkpoints for user {user_id}: {e}")
+            raise Exception(f"Failed to count checkpoints: {e}")
