@@ -28,7 +28,7 @@ const ChatWithApproval: React.FC = () => {
   const [visualizationOpen, setVisualizationOpen] = useState<boolean>(false);
   const [visualizationCharts, setVisualizationCharts] = useState<any[] | null>(null);
   const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
-  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(true); // Track sidebar expansion for margin
+  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(false); // Track sidebar expansion (default collapsed to match sidebar)
   const [currentThreadTitle, setCurrentThreadTitle] = useState<string>(''); // Thread title state
   const [showExecutionHistory, setShowExecutionHistory] = useState<boolean>(false); // Track execution history view
 

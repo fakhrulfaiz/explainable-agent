@@ -44,12 +44,14 @@ interface ToolCallMessageProps {
 }
 
 export const ToolCallMessage: React.FC<ToolCallMessageProps> = ({ toolCalls, content }) => {
-  // Determine effective status: disabled if no content, pending if content exists
+  // Determine effective status: enabled if has content OR output, disabled if neither
   const getEffectiveStatus = (call: ToolCall): ToolCallStatus | 'disabled' => {
-    if (!content || content.trim() === '') {
-      return 'disabled';
+    // Enable if there's content OR if the tool call has output/result
+    if ((content && content.trim() !== '') || (call.output && call.output !== null && call.output !== '')) {
+      return call.status;
     }
-    return call.status;
+    // Disable if no content and no output yet (still calling)
+    return 'disabled';
   };
 
   const getStatusColor = (status: ToolCallStatus | 'disabled'): string => {

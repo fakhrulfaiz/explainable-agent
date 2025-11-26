@@ -18,23 +18,24 @@ interface MessageRendererProps {
   onAction?: (action: string, data?: any) => void;
 }
 
-interface SequentialToolCallsRendererProps {
+interface ToolHistoryCollapsibleProps {
   blocks: ContentBlock[];
-  sequentialIndices: number[];
+  collapseUntilIndex: number;
   renderContentBlock: (block: ContentBlock) => React.ReactNode;
 }
 
-const SequentialToolCallsRenderer: React.FC<SequentialToolCallsRendererProps> = ({ 
+const ToolHistoryCollapsible: React.FC<ToolHistoryCollapsibleProps> = ({ 
   blocks, 
-  sequentialIndices, 
+  collapseUntilIndex, 
   renderContentBlock 
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   
-  // Get all tool names from sequential blocks
+  // Collect tool names from collapsed portion
+  const collapsedBlocks = blocks.slice(0, collapseUntilIndex);
+  const remainingBlocks = blocks.slice(collapseUntilIndex);
   const toolNames: string[] = [];
-  sequentialIndices.forEach(index => {
-    const block = blocks[index];
+  collapsedBlocks.forEach((block) => {
     if (isToolCallsBlock(block)) {
       block.data.toolCalls.forEach((tc: any) => {
         toolNames.push(tc.name);
@@ -42,20 +43,9 @@ const SequentialToolCallsRenderer: React.FC<SequentialToolCallsRendererProps> = 
     }
   });
   
-  // Group blocks: sequential tool_calls vs others
-  const sequentialStart = Math.min(...sequentialIndices);
-  const sequentialEnd = Math.max(...sequentialIndices);
-  
-  const beforeBlocks = blocks.slice(0, sequentialStart);
-  const sequentialBlocks = blocks.slice(sequentialStart, sequentialEnd + 1);
-  const afterBlocks = blocks.slice(sequentialEnd + 1);
-  
   return (
     <div className="content-blocks">
-      {/* Blocks before sequential tool calls */}
-      {beforeBlocks.map((block) => renderContentBlock(block))}
-      
-      {/* Collapsible wrapper for sequential tool calls */}
+      {/* Collapsible wrapper for history before the latest tool call */}
       <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
         <CollapsibleTrigger asChild>
           <button
@@ -68,7 +58,7 @@ const SequentialToolCallsRenderer: React.FC<SequentialToolCallsRendererProps> = 
               <ChevronRight className="w-4 h-4 flex-shrink-0 transition-transform duration-200" />
             )}
             <span className="font-semibold text-foreground">
-              {toolNames.length} tools executed
+              Previous steps ({toolNames.length} tools)
             </span>
           </button>
         </CollapsibleTrigger>
@@ -87,13 +77,13 @@ const SequentialToolCallsRenderer: React.FC<SequentialToolCallsRendererProps> = 
         
         <CollapsibleContent className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 duration-200">
           <div className="pt-2">
-            {sequentialBlocks.map((block) => renderContentBlock(block))}
+            {collapsedBlocks.map((block) => renderContentBlock(block))}
           </div>
         </CollapsibleContent>
       </Collapsible>
       
-      {/* Blocks after sequential tool calls */}
-      {afterBlocks.map((block) => renderContentBlock(block))}
+      {/* Latest tool call and everything after */}
+      {remainingBlocks.map((block) => renderContentBlock(block))}
     </div>
   );
 };
@@ -197,31 +187,21 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ message, onAct
         })
       : contentBlocks;
     
-    // Detect sequential tool_calls blocks
-    const sequentialToolCallsBlocks: number[] = [];
-    let currentSequence: number[] = [];
+    // Collapse everything before the latest tool call block (if any exists)
+    const latestToolCallIndex = filteredBlocks.reduce((acc, block, index) => (
+      isToolCallsBlock(block) ? index : acc
+    ), -1);
     
-    filteredBlocks.forEach((block, index) => {
-      if (isToolCallsBlock(block)) {
-        currentSequence.push(index);
-      } else {
-        if (currentSequence.length >= 2) {
-          sequentialToolCallsBlocks.push(...currentSequence);
-        }
-        currentSequence = [];
-      }
-    });
+    const hasHistoryBeforeLatestToolCall = latestToolCallIndex > 0;
     
-    // Don't forget the last sequence
-    if (currentSequence.length >= 2) {
-      sequentialToolCallsBlocks.push(...currentSequence);
-    }
-    
-    const hasSequentialToolCalls = sequentialToolCallsBlocks.length >= 2;
-    
-    // If we have sequential tool_calls blocks, wrap them in a collapsible
-    if (hasSequentialToolCalls) {
-      return <SequentialToolCallsRenderer blocks={filteredBlocks} sequentialIndices={sequentialToolCallsBlocks} renderContentBlock={renderContentBlock} />;
+    if (hasHistoryBeforeLatestToolCall) {
+      return (
+        <ToolHistoryCollapsible 
+          blocks={filteredBlocks} 
+          collapseUntilIndex={latestToolCallIndex} 
+          renderContentBlock={renderContentBlock} 
+        />
+      );
     }
     
     return (

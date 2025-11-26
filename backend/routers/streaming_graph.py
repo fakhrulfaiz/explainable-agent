@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from sse_starlette.sse import EventSourceResponse
 from uuid import uuid4
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Dict
 import logging
 import json
 import asyncio
@@ -230,6 +230,8 @@ async def stream_graph(request: Request, thread_id: str,
             last_started_tool_name = None
             tool_call_sequence = 0  # Track order of tool calls
             
+            # No need to track block IDs - just use stream_id directly as block_id
+            
             for msg, metadata in agent.graph.stream(input_state, config, stream_mode="messages"):
                 if await request.is_disconnected():
                     break
@@ -451,9 +453,10 @@ async def stream_graph(request: Request, thread_id: str,
                             except json.JSONDecodeError:
                                 continue
                         else:
+                            # Use stream_id directly as block_id - much simpler!
                             token_data = json.dumps({
                                 "block_type": "text",
-                                "block_id": text_block_id,
+                                "block_id": f"text_{msg_id}",
                                 "content": msg.content,
                                 "node": node_name,
                                 "stream_id": msg_id,
@@ -488,9 +491,10 @@ async def stream_graph(request: Request, thread_id: str,
                             yield {"event": "content_block", "data": tool_expl_final}
                             continue
                         
+                        # Use stream_id directly as block_id - much simpler!
                         yield {"event": "content_block", "data": json.dumps({
                             "block_type": "text",
-                            "block_id": text_block_id,
+                            "block_id": f"text_{msg_id_final}",
                             "content": msg.content,
                             "node": node_name,
                             "message_id": assistant_message_id,
@@ -726,7 +730,159 @@ async def stream_graph(request: Request, thread_id: str,
                 del run_configs[thread_id]
                 
         except Exception as e:
-            yield {"event": "error", "data": json.dumps({"error": str(e)})}
+            error_message = str(e) if e else "Unknown error occurred"
+            logger.error(f"Streaming graph error for thread {thread_id}: {error_message}", exc_info=True)
+            
+            # Ensure assistant_message_id exists for error tracking
+            if not assistant_message_id:
+                assistant_message_id = int(time.time() * 1000000)
+                run_data["assistant_message_id"] = assistant_message_id
+            
+            # Flush any pending tool calls with error state
+            def _parse_args(args_str: str) -> Dict[str, Any]:
+                if not args_str:
+                    return {}
+                try:
+                    return json.loads(args_str)
+                except json.JSONDecodeError:
+                    return {}
+            
+            for pending_id, tool_info in list(pending_tool_calls.items()):
+                tool_call_id = tool_info.get('tool_call_id') or pending_id
+                tool_name = tool_info.get('tool_name', 'unknown')
+                parsed_args = _parse_args(tool_info.get('args', ''))
+                
+                if tool_call_id not in tool_calls_content_blocks:
+                    tool_calls_content_blocks[tool_call_id] = {
+                        "id": f"tool_{tool_call_id}",
+                        "type": "tool_calls",
+                        "sequence": tool_info.get('sequence', 0),
+                        "needsApproval": False,
+                        "data": {
+                            "toolCalls": [],
+                            "content": tool_info.get('content') or None
+                        }
+                    }
+                
+                tool_calls_content_blocks[tool_call_id]["data"]["toolCalls"].append({
+                    "name": tool_name,
+                    "input": parsed_args,
+                    "output": f"Error: {error_message}",
+                    "status": "error",
+                    "error": error_message
+                })
+                
+                tool_error_event = json.dumps({
+                    "block_type": "tool_calls",
+                    "block_id": f"tool_{tool_call_id}",
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "node": "agent",
+                    "input": parsed_args,
+                    "error": error_message,
+                    "action": "update_tool_error"
+                })
+                yield {"event": "content_block", "data": tool_error_event}
+            
+            pending_tool_calls.clear()
+            last_started_tool_id = None
+            last_started_tool_name = None
+            
+            # Emit error text block for frontend visibility
+            error_block_id = f"error_{assistant_message_id or int(time.time() * 1000)}"
+            error_block_event = json.dumps({
+                "block_type": "text",
+                "block_id": error_block_id,
+                "content": f"Error: {error_message}",
+                "node": "agent",
+                "message_id": assistant_message_id,
+                "action": "append_error"
+            })
+            yield {"event": "content_block", "data": error_block_event}
+            
+            # Gather current graph state for context (best-effort)
+            steps = []
+            plan = ""
+            query = run_data.get("human_request", "")
+            checkpoint_id = None
+            try:
+                state = agent.graph.get_state(config)
+                if state:
+                    values = getattr(state, "values", {}) or {}
+                    steps = values.get("steps", []) or []
+                    plan = values.get("plan", "") or ""
+                    query = values.get("query", query)
+                    
+                    if hasattr(state, 'config') and state.config and 'configurable' in state.config:
+                        configurable = state.config['configurable']
+                        if 'checkpoint_id' in configurable:
+                            checkpoint_id = str(configurable['checkpoint_id'])
+            except Exception:
+                pass
+            
+            # Persist error message for backend history
+            if message_service:
+                try:
+                    content_blocks = []
+                    
+                    sorted_tool_calls = sorted(
+                        tool_calls_content_blocks.items(),
+                        key=lambda x: x[1].get('sequence', 0)
+                    )
+                    for _, content_block in sorted_tool_calls:
+                        if len(content_block["data"]["toolCalls"]) > 0:
+                            content_blocks.append(content_block)
+                    
+                    content_blocks.append({
+                        "id": error_block_id,
+                        "type": "text",
+                        "needsApproval": False,
+                        "data": {"text": f"Error: {error_message}"}
+                    })
+                    
+                    await message_service.save_assistant_message(
+                        thread_id=thread_id,
+                        content=content_blocks,
+                        message_type="structured",
+                        checkpoint_id=checkpoint_id,
+                        needs_approval=False,
+                        message_id=assistant_message_id,
+                        user_id=user_id
+                    )
+                    
+                    await message_service.update_message_status(
+                        thread_id=thread_id,
+                        message_id=assistant_message_id,
+                        message_status="error"
+                    )
+                except Exception as save_error:
+                    logger.error(f"Failed to persist error message for thread {thread_id}: {save_error}")
+            
+            # Notify frontend about error status
+            status_data = json.dumps({
+                "status": "error",
+                "error": error_message
+            })
+            yield {"event": "status", "data": status_data}
+            
+            error_payload = {
+                "success": False,
+                "data": {
+                    "thread_id": thread_id,
+                    "checkpoint_id": checkpoint_id,
+                    "run_status": "error",
+                    "assistant_response": None,
+                    "query": query,
+                    "plan": plan,
+                    "error": error_message,
+                    "steps": steps,
+                    "final_result": None,
+                    "total_time": None,
+                    "overall_confidence": None
+                },
+                "message": f"Execution failed: {error_message}"
+            }
+            yield {"event": "completed", "data": json.dumps(error_payload)}
             
             if thread_id in run_configs:
                 del run_configs[thread_id]

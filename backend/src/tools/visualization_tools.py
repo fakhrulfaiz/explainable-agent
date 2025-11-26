@@ -5,13 +5,16 @@ These tools help transform database query results into visualization-ready forma
 
 from langchain.tools import BaseTool
 from langchain_core.prompts import ChatPromptTemplate
-from typing import List, Dict, Any, Tuple, Optional
+from langchain_core.tools import InjectedToolCallId
+from langgraph.prebuilt import InjectedState
+from typing import List, Dict, Any, Tuple, Optional, Annotated
 from pydantic import Field
 import json
 from src.utils.pie_chart_utils import get_pie_guidance
 from src.utils.bar_chart_utils import get_bar_guidance
 from src.utils.line_chart_utils import get_line_guidance
 from src.utils.chart_utils import get_chart_template
+from src.services.redis_dataframe_service import get_redis_dataframe_service
 
 
 
@@ -257,12 +260,12 @@ Transform this data into the most appropriate visualization format.""")
 
 class LargePlottingTool(BaseTool):
     """
-    Tool for generating high-quality matplotlib plots for large datasets.
-    Handles SQL query execution internally and uploads images to Supabase Storage.
+    Tool for generating high-quality matplotlib plots using DataFrames from Redis.
+    No longer executes SQL directly - uses DataFrame stored by sql_db_to_df tool.
     """
     
     name: str = "large_plotting_tool"
-    description: str = """Generate high-quality matplotlib plots for large datasets (>100 rows) or complex visualizations.
+    description: str = """Generate high-quality matplotlib plots using the current DataFrame from Redis.
     
     Use this tool when:
     - Dataset has more than 100 rows
@@ -272,8 +275,10 @@ class LargePlottingTool(BaseTool):
     - Statistical plots (histograms, box plots, etc.)
     - Advanced matplotlib features not available in frontend charts
     
+    Prerequisites:
+    - A DataFrame must be available (created by sql_db_to_df tool)
+    
     Parameters:
-    - sql_query (str): SQL query to fetch the data
     - x_column (str): Column name for X-axis
     - y_column (str): Column name for Y-axis  
     - plot_type (str): Type of plot (scatter, line, bar, histogram)
@@ -287,22 +292,23 @@ class LargePlottingTool(BaseTool):
     Returns: Markdown image syntax with Supabase public URL for display in chat."""
     
     llm: Any = Field(description="Language model instance")
-    db_engine: Any = Field(description="Database engine for SQL execution")
     
     def _run(
         self,
-        sql_query: str,
         x_column: str,
         y_column: str,
+        *,
         plot_type: str = "scatter",
         title: str = "Data Plot",
         x_label: Optional[str] = None,
         y_label: Optional[str] = None,
         color: str = "blue",
         fig_width: int = 10,
-        fig_height: int = 6
+        fig_height: int = 6,
+        state: Annotated[Dict[str, Any], InjectedState] = None,
+        tool_call_id: Annotated[Optional[str], InjectedToolCallId] = None,
     ) -> str:
-        """Execute the large plotting tool."""
+        """Execute the large plotting tool using DataFrame from Redis."""
         
         # Import required libraries
         try:
@@ -322,12 +328,27 @@ class LargePlottingTool(BaseTool):
             return f"Error: Required libraries not available: {str(e)}"
         
         try:
-            # 1. EXECUTE SQL QUERY
-            logger.info(f"Executing SQL query for large plot: {sql_query}")
-            df = pd.read_sql_query(sql_query, self.db_engine)
+            if state is None:
+                state = {}
+            # 1. GET DATAFRAME FROM REDIS
+            data_context = state.get("data_context")
+            if not data_context or not data_context.df_id:
+                return "Error: No DataFrame available. Please run a SQL query first using sql_db_to_df tool."
+            
+            # Load DataFrame from Redis
+            redis_service = get_redis_dataframe_service()
+            df = redis_service.get_dataframe(data_context.df_id)
+            
+            if df is None:
+                return f"Error: DataFrame {data_context.df_id} not found or expired. Please run the SQL query again using sql_db_to_df tool."
+            
+            # Extend TTL since we're using the DataFrame
+            redis_service.extend_ttl(data_context.df_id)
+            
+            logger.info(f"Using DataFrame {data_context.df_id} with shape {df.shape} for plotting")
             
             if df.empty:
-                return "Error: The SQL query returned no data, so no plot could be generated."
+                return "Error: The DataFrame is empty, so no plot could be generated."
             
             # 2. VALIDATE COLUMNS
             if x_column not in df.columns:
@@ -400,16 +421,30 @@ class LargePlottingTool(BaseTool):
     
     async def _arun(
         self,
-        sql_query: str,
         x_column: str,
         y_column: str,
+        *,
         plot_type: str = "scatter",
         title: str = "Data Plot",
         x_label: Optional[str] = None,
         y_label: Optional[str] = None,
         color: str = "blue",
         fig_width: int = 10,
-        fig_height: int = 6
+        fig_height: int = 6,
+        state: Annotated[Dict[str, Any], InjectedState] = None,
+        tool_call_id: Annotated[Optional[str], InjectedToolCallId] = None,
     ) -> str:
         """Async version of the tool."""
-        return self._run(sql_query, x_column, y_column, plot_type, title, x_label, y_label, color, fig_width, fig_height)
+        return self._run(
+            x_column,
+            y_column,
+            plot_type=plot_type,
+            title=title,
+            x_label=x_label,
+            y_label=y_label,
+            color=color,
+            fig_width=fig_width,
+            fig_height=fig_height,
+            state=state,
+            tool_call_id=tool_call_id,
+        )

@@ -16,8 +16,12 @@ services:
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379
     env_file:
       - ./backend/.env
+    depends_on:
+      - redis
+      - mongodb
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
@@ -94,11 +98,26 @@ services:
     networks:
       - explainable-agent-network
 
+  redis:
+    image: redis:7-alpine
+    container_name: explainable-agent-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - explainable-agent-network
+
 volumes:
   backend_venv:
     driver: local
   mongodb_data:
     name: explainable-agent-mongodb-data
+    driver: local
+  redis_data:
+    name: explainable-agent-redis-data
     driver: local
 
 networks:

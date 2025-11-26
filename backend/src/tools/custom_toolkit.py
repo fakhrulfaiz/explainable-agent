@@ -8,6 +8,7 @@ from langchain.tools import BaseTool
 from typing import List, Any, Optional
 from pydantic import Field
 from .visualization_tools import SmartTransformForVizTool, LargePlottingTool
+from .data_analysis_tools import SqlToDataFrameTool, SecurePythonREPLTool, DataFrameInfoTool
 
 
 class CustomToolkit(BaseToolkit):
@@ -23,10 +24,15 @@ class CustomToolkit(BaseToolkit):
         """Get all custom tools with LLM and database engine automatically injected"""
         tools = [
             SmartTransformForVizTool(llm=self.llm),
+            SecurePythonREPLTool(),
+            DataFrameInfoTool(),
         ]
         
-        # Add LargePlottingTool only if database engine is available
+        # Add database-dependent tools only if database engine is available
         if self.db_engine is not None:
-            tools.append(LargePlottingTool(llm=self.llm, db_engine=self.db_engine))
+            tools.extend([
+                SqlToDataFrameTool(db_engine=self.db_engine),
+                LargePlottingTool(llm=self.llm),
+            ])
         
         return tools

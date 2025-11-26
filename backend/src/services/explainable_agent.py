@@ -15,11 +15,15 @@ from typing import TypedDict, Annotated, List, Dict, Any, Optional, Literal
 import json
 import os
 from datetime import datetime
+import logging
 from pydantic import BaseModel, Field
 from src.models.database import get_mongo_memory
 from src.tools.custom_toolkit import CustomToolkit
 from src.utils.chart_utils import get_supported_charts
 from src.tools.profile_tools import get_profile_tools
+from src.models.chat_models import DataContext
+
+logger = logging.getLogger(__name__)
 try:
     from explainer import Explainer
     from nodes.planner_node import PlannerNode
@@ -35,12 +39,13 @@ class ExplainableAgentState(MessagesState):
     human_comment: Optional[str]
     status: Literal["approved", "feedback", "cancelled"]
     assistant_response: str
-    use_planning: bool = True  # Planning preference from API
-    use_explainer: bool = True  # Whether to use explainer node
-    response_type: Optional[Literal["answer", "replan", "cancel"]] = None  # Type of response from planner
-    agent_type: str = "data_exploration_agent"  # Which specialized agent to use
-    routing_reason: str = ""  # Why this agent was chosen
+    use_planning: bool = True  
+    use_explainer: bool = True  
+    response_type: Optional[Literal["answer", "replan", "cancel"]] = None  
+    agent_type: str = "data_exploration_agent" 
+    routing_reason: str = ""  
     visualizations: Optional[List[Dict[str, Any]]] = []
+    data_context: Optional[DataContext] = None  
 
 
 class ExplainableAgent:
@@ -53,30 +58,21 @@ class ExplainableAgent:
         self.db = SQLDatabase(self.engine)
         self.toolkit = SQLDatabaseToolkit(db=self.db, llm=self.llm)
         self.sql_tools = self.toolkit.get_tools()
-        
-        # Create custom toolkit with LLM and database engine
         self.custom_toolkit = CustomToolkit(llm=self.llm, db_engine=self.engine)
         self.custom_tools = self.custom_toolkit.get_tools()
-        
-        # Combine tools (exclude profile tools from agent exposure)
         self.tools = self.sql_tools + self.custom_tools
-        
-        # Store for long-term memory
         self.store = store
         self.explainer = Explainer(llm)
         self.planner = PlannerNode(llm, self.tools)
         self.logs_dir = logs_dir or os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
         os.makedirs(self.logs_dir, exist_ok=True)
         self.mongo_memory = mongo_memory
-        
-        # Create handoff tools for the assistant
+    
         self.create_handoff_tools()
-        
-        # Create assistant as a react agent with transfer tools and profile tools
         profile_tools = get_profile_tools()
         base_assistant_agent = create_react_agent(
             model=llm,
-            tools=[self.transfer_to_data_exploration] + profile_tools,  # Add transfer_to_explainer_agent when ready
+            tools=[self.transfer_to_data_exploration] + profile_tools, 
             prompt=(
                 "You are an assistant that handles user preferences and routes tasks to specialized agents.\n\n"
                 "AVAILABLE TOOLS:\n"
@@ -109,8 +105,7 @@ class ExplainableAgent:
             ),
             name="assistant"
         )
-        
-        # Store use_planning value for tools to access
+    
         self._use_planning = None
         self._use_explainer = None
         
@@ -140,19 +135,14 @@ class ExplainableAgent:
     
     
     def _get_latest_human_message(self, messages: List[BaseMessage]) -> Optional[str]:
-        """Helper function to extract the latest human message from messages array"""
         if not messages:
             return None
-        
-        # Iterate backwards to find the latest human message
         for msg in reversed(messages):
             if hasattr(msg, 'content') and hasattr(msg, '__class__') and 'HumanMessage' in str(msg.__class__):
                 return msg.content
         return None
     
     def create_handoff_tools(self):
-        """Create handoff tools for the assistant to transfer to specialized agents"""
-        
         @tool("transfer_to_data_exploration", description="Transfer database and SQL queries to the data exploration agent")
         def transfer_to_data_exploration(
             state: Annotated[Dict[str, Any], InjectedState],
@@ -213,69 +203,6 @@ class ExplainableAgent:
         
         self.transfer_to_data_exploration = transfer_to_data_exploration
         
-        @tool("transfer_to_general_agent", description="Transfer general questions and tasks to the general-purpose agent")
-        def transfer_to_general_agent(
-            state: Annotated[Dict[str, Any], InjectedState],
-            tool_call_id: Annotated[str, InjectedToolCallId],
-            task_description: str = ""
-        ) -> Command:
-            """Transfer to general-purpose agent"""
-            
-            tool_message = {
-                "role": "tool",
-                "content": f"Transferring to general agent: {task_description}",
-                "name": "transfer_to_general_agent",
-                "tool_call_id": tool_call_id,
-            }
-            
-            # Extract query from messages if not in state
-            query = state.get("query", "")
-            if not query and "messages" in state and state["messages"]:
-                # Get the first human message as the query
-                for msg in state["messages"]:
-                    if hasattr(msg, 'content') and hasattr(msg, '__class__') and 'HumanMessage' in str(msg.__class__):
-                        query = msg.content
-                        break
-            
-            # Get use_planning value from stored value
-            use_planning = self._use_planning
-            if use_planning is None:
-                use_planning = state.get("use_planning", True)
-            
-            # Get use_explainer value from state
-            use_explainer = self._use_explainer
-            if use_explainer is None:
-                use_explainer = state.get("use_explainer", True)
-            
-            update_state = {
-                "messages": state.get("messages", []) + [tool_message],
-                "agent_type": "general_agent",
-                "routing_reason": f"Transferred to general agent: {task_description}",
-                "query": task_description,
-                "plan": state.get("plan", ""),
-                "steps": state.get("steps", []),
-                "step_counter": state.get("step_counter", 0),
-                "human_comment": state.get("human_comment"),
-                "status": state.get("status", "approved"),
-                "assistant_response": state.get("assistant_response", ""),
-                "use_planning": use_planning,
-                "use_explainer": use_explainer,
-                "visualizations": state.get("visualizations", [])
-            }
-            
-            return Command(
-                goto="general_agent_flow",
-                update=update_state,
-                graph=Command.PARENT,
-            )
-        
-        self.transfer_to_general_agent = transfer_to_general_agent
-        
-        # Future explainer agent transfer tool:
-        # @tool("transfer_to_explainer_agent", description="Transfer explanation and educational tasks")
-        # def transfer_to_explainer_agent(...):
-        #     return Command(goto="explainer_flow", ...)
-    
     def create_graph(self):
         graph = StateGraph(ExplainableAgentState)
         
@@ -303,11 +230,7 @@ class ExplainableAgent:
                 "agent": "agent"
             }
         )
-        # General agent flow - goes directly to general agent, then ends
-        graph.add_edge("general_agent_flow", "general_agent")
-        graph.add_edge("general_agent", END)
-        
-        # Rest of the data exploration flow
+
         graph.add_edge("planner", "human_feedback")
         graph.add_conditional_edges(
             "human_feedback",
@@ -337,20 +260,13 @@ class ExplainableAgent:
         )
         graph.add_edge("explain", "agent")
         
-        # Add memory checkpointer for interrupt functionality
         memory = self.mongo_memory
-        # Compile with store if available
         if self.store:
             return graph.compile(interrupt_before=["human_feedback"], checkpointer=memory, store=self.store)
         else:
             return graph.compile(interrupt_before=["human_feedback"], checkpointer=memory)
     
     def data_exploration_entry(self, state: ExplainableAgentState):
-        """
-        Entry point for data exploration flow - updates query from latest human message.
-        Only updates query for new queries (status="approved"), not for feedback scenarios.
-        Feedback queries are handled by planner_node when processing replan.
-        """
         status = state.get("status", "approved")
         messages = state.get("messages", [])
         current_query = state.get("query", "")
@@ -379,7 +295,6 @@ class ExplainableAgent:
             else:
                 return "agent"    # Go directly to data exploration
 
-        # Default fallback to data exploration
         return "planner" if use_planning else "agent"
     
     def human_feedback(self, state: ExplainableAgentState):
@@ -410,7 +325,6 @@ class ExplainableAgent:
             return "end"  # End the conversation after agent completes
     
     def should_explain(self, state: ExplainableAgentState):
-        """Determine whether to use explainer node based on use_explainer flag"""
         use_explainer = state.get("use_explainer", True)
         
         if use_explainer:
@@ -419,7 +333,6 @@ class ExplainableAgent:
             return "agent"  # Skip explainer and go directly back to agent
     
     def agent_node(self, state: ExplainableAgentState):
-        """Agent reasoning node with improved user preference handling"""
         messages = state["messages"]
         
         # Build personalized system message
@@ -442,17 +355,21 @@ class ExplainableAgent:
             "steps": state.get("steps", []),
             "step_counter": state.get("step_counter", 0),
             "query": state.get("query", ""),
-            "plan": state.get("plan", "")
+            "plan": state.get("plan", ""),
+            "data_context": state.get("data_context"),  
+            "visualizations": state.get("visualizations", [])  
         }
     
     def _build_system_message(self):
         """Build system message with user preferences at the top"""
         
-        # 1. USER PREFERENCES FIRST (most important for personalization)
         user_context = self._get_user_preferences()
-        
-        # 2. CORE ROLE AND BEHAVIOR
         base_prompt = """You are a helpful SQL database assistant.
+
+CORE RESPONSIBILITIES:
+1. Answer user questions accurately using the available tools.
+2. Avoid making assumptions; verify with data.
+3. Be efficient: Do not repeat successful tool calls.
 
 RESPONSE STYLE:
 - Be direct and concise - answer only what is asked
@@ -460,57 +377,71 @@ RESPONSE STYLE:
 - Format data as markdown tables when showing query results
 - Use code blocks with syntax highlighting for code/SQL
 """
-        
-        # 3. DATABASE QUERY GUIDELINES
         db_guidelines = """DATABASE OPERATIONS:
 
-You are an agent designed to interact with a SQL database.
-Given an input question, create a syntactically correct sqlite query to run, then look at the results of the query and return the answer.
-Unless the user specifies a specific number of examples they wish to obtain, always limit your query to at most 5 results.
-You can order the results by a relevant column to return the most interesting examples in the database.
-Never query for all the columns from a specific table, only ask for the relevant columns given the question.
-You have access to tools for interacting with the database.
-Only use the below tools. Only use the information returned by the below tools to construct your final answer.
-You MUST double check your query before executing it. If you get an error while executing a query, rewrite the query and try again.
+1. **EXPLORATION FIRST**:
+   - Always check `sql_db_list_tables` or `sql_db_schema` if you are unsure about table names or columns.
+   - Do not guess column names.
 
-DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
+2. **QUERY CONSTRUCTION**:
+   - Write syntactically correct SQLite queries.
+   - **LIMIT RESULTS**: Always use `LIMIT` (e.g., 5-10) if planning to user sql_db_query tool unless the user asks for all data oor something that require large data.
+   - **SELECTIVE**: Select only necessary columns.
+   - **READ-ONLY**: SELECT statements ONLY. No INSERT/UPDATE/DELETE.
 
-To start you should ALWAYS look at the tables in the database to see what you can query.
-Do NOT skip this step.
-Then you should query the schema of the most relevant tabl
+3. **ERROR HANDLING**:
+   - If a query fails, check the error message.
+   - Common errors: Wrong column name, syntax error.
+   - Fix the query and try ONCE more. If it fails again, ask the user for clarification.
 """
-        
-        # 4. VISUALIZATION RULES
+
         viz_rules = self._get_visualization_rules()
-        
-        # 5. TOOL USAGE RULES
-        tool_rules = """TOOL USAGE:
-- ONLY call tools when necessary to answer the question
-- NEVER call the same tool twice with identical arguments
-- ALWAYS call the large_plotting_tool when user explicitly requests a matplotlib plot
-- Use smart_transform_for_viz ONLY when user explicitly requests a chart/graph/visualization
-- Stop and inform user if you can't find required data
-"""
-        
-        # 6. OUTPUT FORMAT RULES
-        output_rules = """OUTPUT FORMAT:
-- NEVER generate base64 images (no data:image/png;base64,...)
-- NEVER use markdown image tags for charts: ![chart](...)
-- For visualizations: only call smart_transform_for_viz tool, don't generate images
-- For user-provided image URLs from database: use markdown format ![Alt](url)
-- Keep explanations brief and relevant
 
+        tool_rules = """TOOL USAGE & EXECUTION STRATEGY:
+
+1. **THINK BEFORE ACTING**:
+   - Before calling a tool, check the conversation history.
+   - Has this tool been called with these arguments before? If yes, DO NOT call it again. Use the existing output.
+   - Do you have enough information to answer? If yes, stop calling tools and answer.
+
+2. **PREVENTING RECURSION & LOOPS**:
+   - You are limited to a small number of tool calls per turn.
+   - If a tool fails or returns unexpected results, DO NOT retry immediately with the same arguments.
+   - Analyze the error, change your approach, or inform the user.
+   - **CRITICAL**: If you find yourself calling the same tool twice with same arguments and still produce error, STOP.
+
+3. **CHOOSING THE RIGHT TOOL**:
+   - **sql_db_query**: For simple, specific questions that require 5-10 rows of data.
+   - **sql_db_to_df**: For complex analysis, plotting, or large datasets. Stores data in Redis for other tools.
+   - **python_repl**: For calculations/analysis on the DataFrame created by `sql_db_to_df`.
+   - **large_plotting_tool**: For static images (matplotlib) or complex statistical plots.
+   - **smart_transform_for_viz**: For simple, interactive frontend charts (bar, line, pie).
+
+4. **WORKFLOWS**:
+   - **Analysis**: `sql_db_to_df` -> `dataframe_info` -> `python_repl`
+   - **Plotting**: `sql_db_to_df` -> `large_plotting_tool` 
+   - **Simple Query**: `sql_db_query`-> `smart_transform_for_viz`(IF ASK FOR VISUALIZATION)
+
+5. **DATAFRAME MANAGEMENT**:
+   - Always check if `df` is available/expired before using `python_repl` or `large_plotting_tool`.
+   - If expired/missing, run `sql_db_to_df` first.
 """
-        
-        # 7. INTERACTION GUIDELINES
+
+        output_rules = """OUTPUT FORMAT:
+- Avoid generating base64 images directly (use appropriate visualization tools instead)
+- For frontend visualizations: use smart_transform_for_viz tool rather than generating images
+- For matplotlib/static plots: use large_plotting_tool (it handles image upload and returns markdown)
+- For image URLs from database: use standard markdown format ![Alt](url)
+- Keep explanations clear and relevant to the user's request
+"""
+
         interaction_rules = """INTERACTION:
-- After providing data, you MAY suggest ONE relevant next step if valuable
-- Example: "Would you like to visualize this as a chart?"
-- Keep suggestions minimal - don't repeatedly prompt for actions
-- If request is clear and complete, just answer it without extra suggestions
+- After providing data, you can suggest relevant next steps when helpful
+- Example: "Would you like to visualize this data or perform additional analysis?"
+- Keep suggestions natural and relevant to the user's workflow
+- Focus on answering the user's question completely and clearly
 """
-        
-        # Combine all sections with clear hierarchy
+
         system_message = f"""{user_context}
 
 {base_prompt}
@@ -534,11 +465,12 @@ Response:
 2. Call smart_transform_for_viz with viz_type='bar'
 3. Done - no images or extra suggestions
 
-Bad Examples (DON'T DO):
-- Generating base64 images
-- Calling visualization without explicit request
+Things to Avoid:
+- Generating base64 images directly
+- Creating visualizations without user request
 - Using unsupported chart types
-- Calling same tool multiple times
+- Calling the same tool repeatedly with identical arguments
+- Looping on failed queries
 """
         
         return system_message
@@ -567,8 +499,7 @@ Bad Examples (DON'T DO):
             user_name = profile.get("name", "")
             comm_style = profile.get("communication_style", "balanced")
             preferences = profile.get("preferences", {})
-            
-            # Build style-specific instructions
+   
             style_instructions = {
                 "concise": "Keep responses brief and to-the-point. Use short sentences. Avoid lengthy explanations unless specifically asked.",
                 "detailed": "Provide thorough explanations with context and examples. Include relevant details that help understanding.",
@@ -579,8 +510,7 @@ Bad Examples (DON'T DO):
             }
             
             style_instruction = style_instructions.get(comm_style, style_instructions["balanced"])
-            
-            # Format preferences context
+   
             pref_context = f"""═══════════════════════════════════════
 USER PREFERENCES (PRIORITY: HIGHEST)
 ═══════════════════════════════════════
@@ -590,8 +520,7 @@ Communication Style: {comm_style}
 STYLE INSTRUCTIONS:
 {style_instruction}
 """
-            
-            # Add custom preferences if they exist
+  
             if preferences:
                 pref_context += f"Custom Settings:\n"
                 for key, value in preferences.items():
@@ -610,7 +539,6 @@ PERSONALIZATION RULES:
             return pref_context
             
         except Exception as e:
-            # Gracefully handle errors - don't break the agent
             print(f"Warning: Could not load user preferences: {e}")
             return ""
     
@@ -665,56 +593,22 @@ IMPORTANT:
 • Only call when explicitly requested
 • Do not generate image data
 """
-    
-    def general_agent_node(self, state: ExplainableAgentState):
-        """General-purpose agent that can answer anything"""
-        messages = state["messages"]
-        
-        system_message = """You are a helpful general-purpose AI assistant. You can answer questions, have conversations, provide explanations, help with various tasks, and engage in general discussion.
 
-Guidelines:
-- Be helpful, accurate, and conversational
-- Provide clear and detailed explanations when asked
-- If you don't know something, say so honestly
-- Be friendly and engaging in your responses
-- Use markdown formatting when appropriate for better readability
-- If asked about specific topics, provide comprehensive and useful information"""
 
-        # Use the LLM directly without tools for general conversation
-        conversation_messages = [msg for msg in messages 
-                               if not isinstance(msg, SystemMessage)]
-        
-        # Prepare messages for LLM
-        all_messages = [SystemMessage(content=system_message)] + conversation_messages
-        
-        response = self.llm.invoke(all_messages)
-        
-        return {
-            "messages": messages + [response],
-            "steps": state.get("steps", []),
-            "step_counter": state.get("step_counter", 0),
-            "query": state.get("query", ""),
-            "plan": state.get("plan", "")
-        }
-    
     def tool_explanation_node(self, state: ExplainableAgentState):
-        """
-        Generates a brief explanation of upcoming tool calls before execution.
-        """
+      
         messages = state["messages"]
         if not messages:
             return {"messages": []}
         
         last_message = messages[-1]
         
-        # Early return if no tool calls
         if not getattr(last_message, 'tool_calls', None):
             return {"messages": []}
 
         if getattr(last_message, 'content', None):
             return {"messages": []}
-        
-        # Build tool name to description mapping
+
         tool_name_to_desc = {}
         for tool in getattr(self, 'tools', []) or []:
             name = getattr(tool, 'name', None)
@@ -722,14 +616,13 @@ Guidelines:
             if name:
                 tool_name_to_desc[name] = desc or "No description available"
         
-        # Format tool descriptions with args
         tool_descriptions = []
         for call in last_message.tool_calls:
             name = call.get('name', 'unknown')
             args = call.get('args', {})
             desc = tool_name_to_desc.get(name, "No description available")
             
-            # Format args compactly
+        
             args_str = json.dumps(args, ensure_ascii=False) if not isinstance(args, str) else args
             if len(args_str) > 200:
                 args_str = args_str[:200] + "..."
@@ -738,10 +631,10 @@ Guidelines:
         
         tools_text = "\n".join(tool_descriptions)
         
-        # Get user preferences for personalized explanation
+
         user_preferences = self._get_user_preferences()
         
-        # Generate explanation with full context
+
         system_prompt = f"""
 
 Provide a concise, user-facing explanation (1–2 sentences) of the next step you will take to answer the question.
@@ -787,7 +680,9 @@ Examples:
     
         # Execute tools
         tool_node = ToolNode(tools=self.tools)
-        result = tool_node.invoke({"messages": messages})
+        result = tool_node.invoke(state)
+        
+        logger.info("Tool node result: %s", result)
         
         # Capture step information for explainer
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
@@ -831,12 +726,60 @@ Examples:
                         print(f"Failed to parse visualization output: {tool_output}")
                         state["visualizations"].append({"error": "Invalid JSON output"})
 
+                if tool_call['name'] == "sql_db_to_df":
+                    logger.info(
+                        "sql_db_to_df raw output for tool_call_id=%s: %s",
+                        tool_call.get('id'),
+                        tool_output,
+                    )
+                    try:
+                        parsed_output = json.loads(tool_output)
+                    except (TypeError, json.JSONDecodeError):
+                        logger.info(
+                            "Failed to parse sql_db_to_df output for tool_call_id=%s. Raw output: %s",
+                            tool_call.get('id'),
+                            tool_output,
+                        )
+                        continue
+                    
+                    data_context_payload = parsed_output.get("data_context")
+                    if data_context_payload:
+                        try:
+                            # Convert shape list to tuple if needed
+                            if "shape" in data_context_payload and isinstance(data_context_payload["shape"], list):
+                                data_context_payload["shape"] = tuple(data_context_payload["shape"])
+                            
+                            # Parse datetime strings if needed
+                            if "created_at" in data_context_payload and isinstance(data_context_payload["created_at"], str):
+                                data_context_payload["created_at"] = datetime.fromisoformat(data_context_payload["created_at"])
+                            
+                            if "expires_at" in data_context_payload and isinstance(data_context_payload["expires_at"], str):
+                                data_context_payload["expires_at"] = datetime.fromisoformat(data_context_payload["expires_at"])
+                            
+                            state["data_context"] = DataContext(**data_context_payload)
+                            logger.info(
+                                "Successfully updated data_context for tool_call_id=%s: df_id=%s",
+                                tool_call.get('id'),
+                                data_context_payload.get('df_id')
+                            )
+                        except Exception as e:
+                            logger.error(
+                                "Failed to create DataContext for tool_call_id=%s. Error: %s. Payload: %s",
+                                tool_call.get('id'),
+                                str(e),
+                                data_context_payload,
+                                exc_info=True
+                            )
+                    
+
         return {
             "messages": result["messages"],
             "steps": steps,
             "step_counter": step_counter,
             "query": state.get("query", ""),
-            "plan": state.get("plan", "")
+            "plan": state.get("plan", ""),
+            "data_context": state.get("data_context"),  # Preserve DataFrame context
+            "visualizations": state.get("visualizations", [])  # Preserve visualizations
         }
     
     def explainer_node(self, state: ExplainableAgentState):
@@ -845,10 +788,8 @@ Examples:
         updated_steps = []
         
         for i, step in enumerate(steps):
-            # Create a copy to avoid mutating original state
             step_copy = step.copy()
             
-            # Check if step is missing required fields
             missing_fields = [field for field in ["decision", "reasoning", "confidence", "why_chosen"] 
                              if field not in step_copy]
             
@@ -890,13 +831,10 @@ Examples:
             "steps": updated_steps,
             "step_counter": state.get("step_counter", 0),
             "query": state.get("query", ""),
-            "plan": state.get("plan", "")
+            "plan": state.get("plan", ""),
+            "data_context": state.get("data_context"),  # Preserve DataFrame context
+            "visualizations": state.get("visualizations", [])  # Preserve visualizations
         }
-    def get_interrupt_state(self, config=None):
-         
-        if config is None:
-            config = {"configurable": {"thread_id": "main_thread"}}
-        return self.graph.get_state(config)
     
     def continue_with_feedback(self, user_feedback: str, status: str = "feedback", config=None):
 

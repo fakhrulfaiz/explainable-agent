@@ -1,8 +1,24 @@
 from pydantic import BaseModel, Field, validator
-from typing import List, Optional, Literal, Dict, Any
+from typing import List, Optional, Literal, Dict, Any, Tuple
 from datetime import datetime
 from bson import ObjectId
 import warnings
+
+
+class DataContext(BaseModel):
+    """Context information for DataFrame stored in Redis"""
+    df_id: Optional[str] = Field(None, description="Redis key for DataFrame")
+    sql_query: Optional[str] = Field(None, description="Last executed SQL query")
+    columns: List[str] = Field(default_factory=list, description="DataFrame column names")
+    shape: Tuple[int, int] = Field(default=(0, 0), description="DataFrame dimensions (rows, cols)")
+    created_at: Optional[datetime] = Field(None, description="When DataFrame was created")
+    expires_at: Optional[datetime] = Field(None, description="When Redis key expires")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
 
 
 class MessageContent(BaseModel):

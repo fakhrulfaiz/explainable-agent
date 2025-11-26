@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
 
     # Database Configuration
-    database_path: str = "src/resource/test.db"
+    database_path: str = "src/resource/chinook.db"
     
     # MongoDB Configuration
     mongo_host: str = "mongodb"
@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     mongo_password: str = "explainable-agent-secret"
     mongo_database: str = "explainable_agent_db"
     mongo_auth_source: str = "admin"
+    
+    # Redis Configuration
+    redis_url: str = "redis://redis:6379"
+    redis_host: str = "redis" 
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: str = ""
+    redis_ttl: int = 3600  # DataFrame TTL in seconds (1 hour)
     
     # Logging Configuration
     logs_dir: str = "logs"
