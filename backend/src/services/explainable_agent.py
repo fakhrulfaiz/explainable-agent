@@ -335,17 +335,13 @@ class ExplainableAgent:
     def agent_node(self, state: ExplainableAgentState):
         messages = state["messages"]
         
-        # Build personalized system message
         system_message = self._build_system_message()
         
-        # Bind tools to LLM
         llm_with_tools = self.llm.bind_tools(self.tools)
         
-        # Filter out previous system messages to avoid conflicts
         conversation_messages = [msg for msg in messages 
                                if not isinstance(msg, SystemMessage)]
         
-        # Prepare messages for LLM
         all_messages = [SystemMessage(content=system_message)] + conversation_messages
         
         response = llm_with_tools.invoke(all_messages)
