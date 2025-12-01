@@ -208,11 +208,10 @@ class ExplainableAgent:
         
         # Add nodes
         graph.add_node("assistant", self.assistant_agent)  
-        graph.add_node("data_exploration_flow", self.data_exploration_entry)  
+        graph.add_node("data_exploration_flow", self.data_exploration_entry)
         graph.add_node("general_agent_flow", self.general_agent_entry)
         graph.add_node("planner", self.planner_node)
         graph.add_node("agent", self.agent_node)
-        graph.add_node("general_agent", self.general_agent_node)
         graph.add_node("tools", self.tools_node)
         graph.add_node("tool_explanation", self.tool_explanation_node)
         graph.add_node("explain", self.explainer_node)
